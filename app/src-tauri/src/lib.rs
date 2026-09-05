@@ -1,0 +1,64 @@
+mod fsx;
+mod git;
+mod github;
+mod projects;
+mod store;
+
+use std::sync::Mutex;
+
+pub struct AppState {
+    pub token: Mutex<Option<String>>,
+    pub http: github::Http,
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .manage(AppState {
+            token: Mutex::new(None),
+            http: github::Http::new(),
+        })
+        .invoke_handler(tauri::generate_handler![
+            // 认证
+            github::auth_status,
+            github::login_pat,
+            github::logout,
+            // My GitHub
+            github::list_my_repos,
+            // 项目 / clone
+            projects::check_clone_target,
+            projects::clone_repo,
+            projects::add_existing_project,
+            projects::list_projects,
+            projects::remove_project,
+            // worktree / 分支
+            projects::list_branches,
+            projects::create_worktree,
+            projects::remove_worktree,
+            projects::lock_worktree,
+            // 文件系统
+            fsx::read_dir,
+            fsx::read_file_preview,
+            fsx::checkout_status,
+            fsx::trash_path,
+            fsx::open_in_editor,
+            fsx::open_in_terminal,
+            fsx::reveal_in_explorer,
+            // issues / PRs
+            github::list_issues,
+            github::list_prs,
+            projects::spawn_issue_worktree,
+            projects::spawn_pr_worktree,
+            projects::create_pr,
+            // Actions
+            github::list_workflows,
+            github::list_runs,
+            github::rerun_run,
+            github::cancel_run,
+            github::dispatch_workflow,
+            github::latest_run_for_branch,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

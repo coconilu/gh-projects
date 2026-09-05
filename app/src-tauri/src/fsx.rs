@@ -1,0 +1,119 @@
+// 文件系统：懒加载目录、文件预览、git status 角标、回收站删除、系统打开
+
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+
+use crate::git;
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DirEntry {
+    pub name: String,
+    pub is_dir: bool,
+}
+
+#[tauri::command]
+pub fn read_dir(path: String) -> Result<Vec<DirEntry>, String> {
+    let rd = std::fs::read_dir(&path).map_err(|e| format!("读取目录失败 {path}: {e}"))?;
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        out.push(DirEntry { name, is_dir });
+    }
+    out.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(out)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePreview {
+    pub text: String,
+    pub truncated: bool,
+    pub is_binary: bool,
+}
+
+const PREVIEW_LIMIT: usize = 256 * 1024;
+
+#[tauri::command]
+pub fn read_file_preview(path: String) -> Result<FilePreview, String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(&path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let mut buf = Vec::new();
+    f.by_ref()
+        .take((PREVIEW_LIMIT + 1) as u64)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    let truncated = buf.len() > PREVIEW_LIMIT;
+    buf.truncate(PREVIEW_LIMIT);
+    let is_binary = buf.iter().take(8192).any(|&b| b == 0);
+    Ok(FilePreview {
+        text: if is_binary { String::new() } else { String::from_utf8_lossy(&buf).to_string() },
+        truncated,
+        is_binary,
+    })
+}
+
+#[tauri::command]
+pub fn checkout_status(path: String) -> Result<git::StatusMap, String> {
+    git::status_porcelain(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn trash_path(path: String) -> Result<(), String> {
+    trash::delete(&path).map_err(|e| format!("移入回收站失败: {e}"))
+}
+
+#[tauri::command]
+pub fn open_in_editor(path: String) -> Result<(), String> {
+    use std::process::Stdio;
+    let mut c = git::new_cmd("code");
+    c.arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if c.spawn().is_ok() {
+        return Ok(());
+    }
+    // 退路：记事本
+    let mut n = git::new_cmd("notepad");
+    n.arg(&path);
+    n.spawn().map_err(|e| format!("无法打开编辑器（未找到 code / notepad）: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_in_terminal(path: String) -> Result<(), String> {
+    use std::process::Stdio;
+    // 优先 Windows Terminal
+    let mut wt = git::new_cmd("wt");
+    wt.arg("-d").arg(&path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if wt.spawn().is_ok() {
+        return Ok(());
+    }
+    // 退路：新开 cmd 窗口（外层 cmd 自身隐藏）
+    let mut c = git::new_cmd("cmd");
+    c.args(["/c", "start", "gh-projects", "/D", &path, "cmd", "/k"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    c.spawn().map_err(|e| format!("无法打开终端: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reveal_in_explorer(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    let mut c = git::new_cmd("explorer");
+    if p.is_dir() {
+        c.arg(&path);
+    } else {
+        c.arg(format!("/select,{}", path.replace('/', "\\")));
+    }
+    // explorer 经常返回非零退出码，忽略之
+    c.spawn().map_err(|e| format!("无法打开文件管理器: {e}"))?;
+    Ok(())
+}

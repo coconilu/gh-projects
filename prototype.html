@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gh-projects — 原型</title>
+<style>
+:root{
+  --bg:#0d1117; --bg-deep:#010409; --panel:#161b22; --panel-2:#1c2129;
+  --border:#30363d; --border-soft:#21262d;
+  --text:#e6edf3; --muted:#8b949e; --faint:#6e7681;
+  --accent:#2f81f7; --accent-soft:rgba(47,129,247,.15);
+  --green:#3fb950; --yellow:#d29922; --red:#f85149; --purple:#a371f7;
+  --radius:8px; --fs:13px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:var(--fs)/1.5 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#30363d;border-radius:5px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-track{background:transparent}
+
+.app{display:flex;height:100vh}
+
+/* ===== 侧栏 ===== */
+.sidebar{width:300px;min-width:300px;background:var(--bg-deep);border-right:1px solid var(--border);display:flex;flex-direction:column}
+.side-head{padding:12px 12px 8px;display:flex;align-items:center;gap:8px}
+.logo{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,#2f81f7,#a371f7);display:grid;place-items:center;font-size:12px;font-weight:700}
+.side-head b{font-size:14px}
+.side-nav{display:flex;gap:4px;padding:0 12px 10px}
+.nav-chip{padding:3px 10px;border-radius:20px;font-size:12px;color:var(--muted);border:1px solid var(--border)}
+.nav-chip.on{color:var(--text);background:var(--accent-soft);border-color:var(--accent)}
+.group-by{display:flex;align-items:center;gap:6px;padding:0 12px 10px;font-size:12px;color:var(--muted)}
+.group-by select{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-size:12px}
+.rows{flex:1;overflow-y:auto;padding:0 6px 12px}
+.side-foot{border-top:1px solid var(--border-soft);padding:10px 12px;display:flex;gap:12px;font-size:12px}
+.side-foot button{color:var(--accent)}
+.side-foot button:hover{text-decoration:underline}
+
+/* 行通用 */
+.row{display:flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;cursor:pointer;position:relative;white-space:nowrap}
+.row:hover{background:var(--panel)}
+.row.sel{background:var(--panel-2);box-shadow:inset 2px 0 0 var(--accent)}
+.row .twisty{width:14px;color:var(--faint);font-size:10px;text-align:center;flex:none;transition:transform .12s}
+.row .grow{flex:1;overflow:hidden;text-overflow:ellipsis}
+.row .acts{display:none;gap:2px;flex:none}
+.row:hover .acts{display:flex}
+.icon-btn{width:20px;height:20px;border-radius:4px;color:var(--muted);display:grid;place-items:center;font-size:11px}
+.icon-btn:hover{background:var(--border);color:var(--text)}
+
+/* 项目头 */
+.proj{margin-top:6px}
+.proj-head{font-weight:600}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.priv{color:var(--faint);font-size:10px;border:1px solid var(--border);border-radius:4px;padding:0 3px}
+.count-pill{color:var(--faint);font-size:11px;background:var(--panel);border-radius:10px;padding:0 7px;flex:none}
+.alert-dot{width:7px;height:7px;border-radius:50%;background:var(--red);flex:none}
+
+/* checkout 条目（两行块：名称行 + 徽标行） */
+.co-block{position:relative;border-radius:6px}
+.co-block:hover{background:var(--panel)}
+.co-block.sel{background:var(--panel-2);box-shadow:inset 2px 0 0 var(--accent)}
+.co-line{display:flex;align-items:center;gap:6px;padding:3px 8px 0;cursor:pointer;white-space:nowrap}
+.co-badges{display:flex;align-items:center;padding:0 8px 3px;cursor:pointer}
+.co-block .acts{display:none;gap:2px;flex:none}
+.co-block:hover .acts{display:flex}
+.unread-bar{position:absolute;left:-2px;top:4px;bottom:4px;width:2px;background:var(--accent);border-radius:2px}
+.co-block.unread .co-name{font-weight:700}
+.badges{display:flex;gap:4px;align-items:center;padding-left:20px;flex-wrap:wrap}
+.badge{font-size:11px;padding:0 5px;border-radius:4px;display:inline-flex;align-items:center;gap:3px}
+.b-primary{color:var(--purple);background:rgba(163,113,247,.12)}
+.b-issue{color:var(--accent);background:var(--accent-soft);cursor:pointer}
+.b-pr{color:var(--green);background:rgba(63,185,80,.12);cursor:pointer}
+.ci{width:7px;height:7px;border-radius:50%;display:inline-block}
+.ci.ok{background:var(--green)} .ci.run{background:var(--yellow);animation:pulse 1.2s infinite} .ci.fail{background:var(--red)}
+@keyframes pulse{50%{opacity:.35}}
+.ab{color:var(--faint);font-size:11px}
+.ab .up{color:var(--green)} .ab .down{color:var(--red)}
+
+/* 文件树行 */
+.file{color:var(--muted)}
+.file:hover{color:var(--text)}
+.file .fname{flex:1;overflow:hidden;text-overflow:ellipsis}
+.gs{font-size:10px;font-weight:700;width:12px;text-align:center;flex:none}
+.gs.M{color:var(--yellow)} .gs.A{color:var(--green)} .gs.D{color:var(--red)}
+.ignored{opacity:.45}
+
+/* ===== 主内容区 ===== */
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:0 16px;background:var(--bg-deep)}
+.tab{padding:9px 12px;font-size:13px;color:var(--muted);border-bottom:2px solid transparent}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--text);border-bottom-color:#f78166;font-weight:600}
+.content{flex:1;overflow-y:auto;padding:20px 24px}
+.crumb{color:var(--muted);font-size:12px;margin-bottom:12px}
+.crumb b{color:var(--text)}
+h2{font-size:18px;margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+.stat-row{display:flex;gap:28px;margin-bottom:14px}
+.stat b{font-size:22px;display:block}
+.stat span{color:var(--muted);font-size:12px}
+.md{color:#c9d1d9}
+.md h3{margin:12px 0 6px}
+.md code{background:rgba(110,118,129,.3);border-radius:4px;padding:1px 5px;font-size:12px}
+
+/* 表格 */
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:var(--muted);font-weight:500;text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);font-size:12px}
+td{padding:8px 10px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+tr:hover td{background:var(--panel)}
+.id{color:var(--muted)}
+.label-chip{font-size:11px;border-radius:10px;padding:1px 8px;margin-right:4px;border:1px solid}
+.st-open{color:var(--green)} .st-merged{color:var(--purple)} .st-closed{color:var(--faint)}
+.btn{background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:12px}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:#238636;border-color:#2ea043;color:#fff}
+.btn.primary:hover{background:#2ea043}
+.btn.sm{padding:1px 8px}
+
+/* Worktrees & Branches 双栏 */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.co-card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:10px}
+.co-card h4{font-size:13px;display:flex;gap:8px;align-items:center;margin-bottom:6px}
+.co-card .meta{color:var(--muted);font-size:12px;margin-bottom:8px}
+.co-card .ops{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Actions 面板 */
+.actions-wrap{display:grid;grid-template-columns:240px 1fr;gap:14px}
+.wf{padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.wf:hover{background:var(--panel)}
+.wf.on{background:var(--panel-2)}
+.run{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--border-soft)}
+.run:hover{background:var(--panel)}
+.run .grow{flex:1}
+.run .t{color:var(--faint);font-size:12px}
+
+/* 文件预览 */
+.preview-head{display:flex;align-items:center;gap:10px;margin-bottom:12px;color:var(--muted);font-size:12px}
+pre.code{background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);padding:14px;overflow:auto;font:12px/1.6 ui-monospace,"Cascadia Code",Consolas,monospace;color:#c9d1d9}
+
+/* ===== 右侧文件树 panel ===== */
+.ctx{width:290px;min-width:290px;background:var(--bg-deep);border-left:1px solid var(--border);display:flex;flex-direction:column}
+.ctx-head{padding:12px 14px 10px;border-bottom:1px solid var(--border-soft)}
+.ctx-head h3{font-size:13px;margin-bottom:6px}
+.ctx-head .path{font:11px ui-monospace,monospace;color:var(--faint);word-break:break-all;margin-bottom:6px}
+.ctx-head .ops{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.ctx-tree{flex:1;overflow-y:auto;padding:6px 6px 12px}
+.ctx-tree .row{padding:2px 8px}
+.ctx-empty{color:var(--faint);text-align:center;margin-top:60px;font-size:12px;padding:0 14px}
+.check-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px}
+.comment{border-left:2px solid var(--border);padding:4px 0 4px 10px;margin:8px 0;color:#c9d1d9;font-size:12px}
+.comment b{color:var(--muted)}
+
+/* My GitHub 面板 */
+.repo-row{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid var(--border-soft)}
+.repo-row:hover{background:var(--panel)}
+.repo-row .grow{flex:1}
+.repo-row .sub{color:var(--muted);font-size:12px}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel-2);border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-size:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+.toast.show{opacity:1}
+.hint{color:var(--faint);font-size:12px;margin-top:24px;text-align:center}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- 侧栏 -->
+  <aside class="sidebar">
+    <div class="side-head"><div class="logo">gh</div><b>gh-projects</b></div>
+    <div class="side-nav">
+      <button class="nav-chip" id="nav-github">My GitHub</button>
+      <button class="nav-chip on" id="nav-projects">Projects</button>
+    </div>
+    <div class="group-by" id="groupby-bar">
+      分组 <select id="groupby">
+        <option value="repo">按项目</option>
+        <option value="status">按状态</option>
+        <option value="ci">按 CI</option>
+      </select>
+    </div>
+    <div class="rows" id="rows"></div>
+    <div class="side-foot">
+      <button>＋ Clone repository</button>
+      <button>＋ Add local folder</button>
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <section class="main" id="main"></section>
+
+  <!-- 右侧上下文栏 -->
+  <aside class="ctx" id="ctx"></aside>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= mock 数据 ================= */
+const FILESET = [
+  {n:'src', d:true, children:[
+    {n:'main', d:true, children:[{n:'git.ts',gs:'M'},{n:'github.ts'}]},
+    {n:'components', d:true, children:[{n:'Sidebar.tsx',gs:'M'},{n:'WorktreeCard.tsx'}]},
+    {n:'App.tsx'},{n:'main.tsx'}]},
+  {n:'docs', d:true, children:[{n:'方案.md'},{n:'roadmap.md',gs:'A'}]},
+  {n:'.github', d:true, children:[{n:'workflows', d:true, children:[{n:'ci.yml'},{n:'release.yml'}]}]},
+  {n:'package.json', gs:'M'},
+  {n:'pnpm-lock.yaml', ignored:true},
+  {n:'README.md'},
+];
+
+let P = [
+  { id:'p1', name:'gh-projects', owner:'coconilu', priv:false, color:'#2f81f7',
+    open:true, alert:false,
+    checkouts:[
+      {id:'c1', branch:'main', primary:true, ci:'ok', ab:'', link:null, unread:false, status:'进行中',
+       path:'~/gh-projects/gh-projects', open:true, files:FILESET},
+      {id:'c2', branch:'fix/123-sidebar-lag', primary:false, ci:'ok', ab:'↑2', link:{t:'issue',n:123}, unread:true, status:'进行中',
+       path:'~/gh-projects/gh-projects.worktrees/fix-123', open:true, files:FILESET},
+      {id:'c3', branch:'feat/dark-mode', primary:false, ci:'run', ab:'↑5↓1', link:{t:'issue',n:98}, unread:false, status:'待review',
+       path:'~/gh-projects/gh-projects.worktrees/feat-dark', open:true, files:FILESET},
+    ]},
+  { id:'p2', name:'orca', owner:'coconilu', priv:false, color:'#a371f7', fork:'stablyai/orca',
+    open:false, alert:true,
+    checkouts:[
+      {id:'c4', branch:'main', primary:true, ci:'ok', ab:'', link:null, unread:false, status:'进行中', path:'~/gh-projects/orca', files:FILESET},
+      {id:'c5', branch:'feat/my-github-panel', primary:false, ci:'fail', ab:'↑12', link:{t:'pr',n:17180}, unread:false, status:'待review', path:'~/gh-projects/orca.worktrees/my-github', files:FILESET},
+      {id:'c6', branch:'chore/deps', primary:false, ci:'ok', ab:'↑1', link:null, unread:false, status:'待合并', path:'~/gh-projects/orca.worktrees/deps', files:FILESET},
+    ]},
+];
+
+const ISSUES = [
+  {n:123, t:'侧栏 worktree 超过 30 个后滚动掉帧', st:'open', labels:[['bug','#f85149'],['性能','#d29922']], as:'coconilu', co:'fix/123-sidebar-lag'},
+  {n:120, t:'支持从 issue 一键开 worktree', st:'open', labels:[['enhancement','#2f81f7']], as:'—', co:null},
+  {n:98,  t:'暗色模式下 diff 高亮对比度不足', st:'open', labels:[['bug','#f85149'],['UI','#a371f7']], as:'coconilu', co:'feat/dark-mode'},
+  {n:87,  t:'Windows 上 clone 路径含空格报错', st:'open', labels:[['bug','#f85149'],['windows','#2f81f7']], as:'—', co:null},
+  {n:52,  t:'M1：登录与 My Repos 列表', st:'closed', labels:[['milestone','#6e7681']], as:'coconilu', co:null},
+];
+const PRS = [
+  {n:17180, t:'feat: My GitHub panel — sign in, browse, clone', st:'open', checks:'fail', review:'待 review', co:'feat/my-github-panel'},
+  {n:45, t:'feat: worktree 就地文件树', st:'open', checks:'run', review:'评论中', co:'feat/dark-mode'},
+  {n:31, t:'fix: clone 冲突报错文案', st:'merged', checks:'ok', review:'已批准', co:null},
+];
+const WORKFLOWS = [
+  {n:'CI', file:'ci.yml', runs:[
+    {id:'#214', b:'feat/dark-mode', st:'run', by:'coconilu', t:'进行中 · 3m12s'},
+    {id:'#213', b:'main', st:'ok', by:'push', t:'昨天 · 4m05s'},
+    {id:'#212', b:'fix/123-sidebar-lag', st:'ok', by:'coconilu', t:'昨天 · 3m58s'},
+    {id:'#211', b:'feat/dark-mode', st:'fail', by:'coconilu', t:'2 天前 · 2m41s'},
+  ]},
+  {n:'Release', file:'release.yml', runs:[{id:'#12', b:'v0.3.0', st:'ok', by:'tag', t:'上周 · 8m20s'}]},
+  {n:'CodeQL', file:'codeql.yml', runs:[{id:'#88', b:'main', st:'ok', by:'schedule', t:'3 天前 · 6m02s'}]},
+];
+const MY_REPOS = [
+  {name:'gh-projects', priv:false, sub:'TypeScript · 更新于 2 小时前', cloned:true},
+  {name:'orca', priv:false, sub:'fork 自 stablyai/orca · 更新于 昨天', cloned:true},
+  {name:'kimi-workbench-notes', priv:true, sub:'Markdown · 更新于 3 天前', cloned:false},
+  {name:'dotfiles', priv:true, sub:'Shell · 更新于 上周', cloned:false},
+  {name:'math-adventure', priv:false, sub:'JavaScript · 更新于 上周', cloned:false},
+];
+
+/* ================= 状态 ================= */
+let sel = {kind:'project', pid:'p1'};   // 当前选中
+let tab = 'Overview';
+let groupby = 'repo';
+let view = 'projects';                  // projects | github
+let curWf = 0;
+const expandedDirs = new Set(['c1/src']);  // 文件树展开状态：'checkoutId/路径'
+
+/* ================= 工具 ================= */
+const $ = s => document.querySelector(s);
+function findCo(cid){ for(const p of P) for(const c of p.checkouts) if(c.id===cid) return {p,c}; }
+function ciDot(st){ return `<span class="ci ${st}"></span>`; }
+function linkBadge(l){
+  if(!l) return '';
+  return l.t==='issue'
+    ? `<span class="badge b-issue" data-issue="${l.n}">● #${l.n}</span>`
+    : `<span class="badge b-pr" data-pr="${l.n}">⇄ !${l.n}</span>`;
+}
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+
+/* ================= 侧栏渲染（打平投影） ================= */
+function coRow(p,c,depth){
+  const unread = c.unread ? '<span class="unread-bar"></span>' : '';
+  const seld = sel.kind==='checkout' && sel.cid===c.id ? ' sel' : '';
+  const icon = c.primary ? '⌂' : '⎇';
+  const primBadge = c.primary ? '<span class="badge b-primary">primary</span>' : '';
+  const del = c.primary ? '' : `<button class="icon-btn" title="删除（回收站）" data-del="${c.id}">🗑</button>`;
+  const pad = 8 + depth*18;
+  return `<div class="co-block${c.unread?' unread':''}${seld}">
+    <div class="co-line" data-co="${c.id}" style="padding-left:${pad}px">
+      ${unread}<span>${icon}</span>
+      <span class="co-name grow">${c.branch}</span>${primBadge}
+      <span class="acts">
+        <button class="icon-btn" title="在编辑器打开" data-open="${c.id}">⇱</button>
+        <button class="icon-btn" title="在终端打开" data-term="${c.id}">❯</button>
+        ${del}
+      </span>
+    </div>
+    <div class="co-badges" data-co="${c.id}" style="padding-left:${pad}px">
+      <span class="badges">${linkBadge(c.link)}${ciDot(c.ci)}<span class="ab">${c.ab.replace('↑','<span class=up>↑</span>').replace('↓','<span class=down>↓</span>')}</span></span>
+    </div>
+  </div>`;
+}
+
+function fileRows(c, nodes, base, depth){
+  let out='';
+  for(const f of nodes){
+    const key = `${c.id}/${base}${f.n}`;
+    const pad = 4 + depth*16;
+    const seld = sel.kind==='file' && sel.key===key ? ' sel' : '';
+    const cls = f.ignored ? ' ignored' : '';
+    const gs = f.gs ? `<span class="gs ${f.gs}">${f.gs}</span>` : '';
+    if(f.d){
+      const open = expandedDirs.has(key);
+      out += `<div class="row file${cls}${seld}" data-dir="${key}" data-co="${c.id}" style="padding-left:${pad}px">
+        <span class="twisty">${open?'▼':'▶'}</span>📁 <span class="fname">${f.n}</span></div>`;
+      if(open) out += fileRows(c, f.children, base+f.n+'/', depth+1);
+    }else{
+      out += `<div class="row file${cls}${seld}" data-file="${key}" data-co="${c.id}" style="padding-left:${pad}px">
+        <span class="twisty"></span>📄 <span class="fname">${f.n}</span>${gs}</div>`;
+    }
+  }
+  return out;
+}
+
+function renderSidebar(){
+  const box = $('#rows');
+  // My GitHub 视图下侧栏保持 Projects 列表，方便随时跳回；仓库列表由主内容区承载
+  $('#groupby-bar').style.display='flex';
+  let html='';
+  if(groupby==='repo'){
+    for(const p of P){
+      const seld = sel.kind==='project' && sel.pid===p.id ? ' sel' : '';
+      html += `<div class="proj">
+        <div class="row proj-head${seld}" data-proj="${p.id}">
+          <span class="twisty" data-ptoggle="${p.id}">${p.open?'▼':'▶'}</span>
+          <span class="dot" style="background:${p.color}"></span>
+          <span class="grow">${p.name}</span>
+          ${p.priv?'<span class="priv">私有</span>':''}
+          ${p.alert?'<span class="alert-dot" title="有 CI 失败"></span>':''}
+          <span class="count-pill">${p.checkouts.length}</span>
+          <span class="acts"><button class="icon-btn" title="在 GitHub 打开" data-web="${p.id}">↗</button></span>
+        </div>`;
+      if(p.open) for(const c of p.checkouts) html += coRow(p,c,1);
+      html += `</div>`;
+    }
+  }else{
+    // 按状态 / 按 CI：打散的平铺泳道，文件树禁用
+    const buckets = groupby==='status'
+      ? {'进行中':[], '待review':[], '待合并':[]}
+      : {'CI 通过':[], 'CI 进行中':[], 'CI 失败':[]};
+    for(const p of P) for(const c of p.checkouts){
+      const k = groupby==='status' ? c.status : (c.ci==='ok'?'CI 通过':c.ci==='run'?'CI 进行中':'CI 失败');
+      buckets[k].push({p,c});
+    }
+    for(const [k,arr] of Object.entries(buckets)){
+      if(!arr.length) continue;
+      html += `<div class="proj"><div class="row proj-head" style="cursor:default"><span class="twisty">▼</span><span class="grow">${k}</span><span class="count-pill">${arr.length}</span></div>`;
+      for(const {p,c} of arr){
+        const seld = sel.kind==='checkout' && sel.cid===c.id ? ' sel' : '';
+        html += `<div class="row${seld}" data-co="${c.id}" style="padding-left:26px">
+          <span style="width:14px"></span><span>${c.primary?'⌂':'⎇'}</span>
+          <span class="grow">${p.name} / ${c.branch}</span>${linkBadge(c.link)}${ciDot(c.ci)}</div>`;
+      }
+      html += `</div>`;
+    }
+  }
+  box.innerHTML = html;
+}
+
+/* ================= 主内容区 ================= */
+const TABS = ['Overview','Worktrees & Branches','Issues','Pull Requests','Actions'];
+
+function tabsBar(name){
+  return `<div class="tabs">${TABS.map(t=>
+    `<button class="tab${t===tab?' on':''}" data-tab="${t}">${t}</button>`).join('')}</div>`;
+}
+
+function renderMain(){
+  const m = $('#main');
+  if(view==='github'){
+    m.innerHTML = `<div class="content" style="padding-top:24px">
+      <h2>My GitHub</h2>
+      <div class="card" style="display:flex;align-items:center;gap:12px">
+        <div class="logo" style="width:36px;height:36px;font-size:18px">co</div>
+        <div class="grow"><b>coconilu</b><div style="color:var(--muted);font-size:12px">已通过 device flow 登录 · token 存于系统 keychain</div></div>
+        <button class="btn">切换账号</button><button class="btn">退出</button>
+      </div>
+      <div class="card"><input placeholder="🔍 搜索我的仓库…" style="width:100%;background:var(--bg-deep);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text)"></div>
+      <div class="card" style="padding:4px 8px" id="myrepo-list"></div>
+    </div>`;
+    $('#myrepo-list').innerHTML = MY_REPOS.map(r=>`
+      <div class="repo-row">
+        <span class="dot" style="background:${r.cloned?'#3fb950':'#6e7681'}"></span>
+        <span class="grow">${r.name} ${r.priv?'<span class="priv">私有</span>':''}<div class="sub">${r.sub}</div></span>
+        ${r.cloned?'<span class="badge b-primary">已在 Projects</span>':`<button class="btn sm primary" data-clone="${r.name}">Clone</button>`}
+      </div>`).join('');
+    return;
+  }
+
+  if(sel.kind==='file'){
+    const {c} = findCo(sel.co);
+    const fname = sel.key.split('/').pop();
+    m.innerHTML = `<div class="content">
+      <div class="crumb">${c.branch} / <b>${sel.key.split('/').slice(1).join('/')}</b></div>
+      <div class="preview-head">📄 ${fname} <span style="color:var(--faint)">· 双击可用编辑器打开</span>
+        <span class="grow"></span><button class="btn sm" data-open="${c.id}">在编辑器打开</button></div>
+      <pre class="code">${fakeCode(fname)}</pre>
+    </div>`;
+    return;
+  }
+
+  const pid = sel.kind==='checkout' ? findCo(sel.cid).p.id : (sel.pid||'p1');
+  const p = P.find(x=>x.id===pid);
+  let body='';
+  if(tab==='Overview'){
+    body = `<h2>${p.owner}/${p.name} ${p.priv?'<span class="priv">私有</span>':''} ${p.fork?`<span class="priv">fork 自 ${p.fork}</span>`:''}</h2>
+      <div class="stat-row">
+        <div class="stat"><b>${ISSUES.filter(i=>i.st==='open').length}</b><span>Open issues</span></div>
+        <div class="stat"><b>${PRS.filter(x=>x.st==='open').length}</b><span>Open PRs</span></div>
+        <div class="stat"><b>${p.checkouts.length}</b><span>Checkouts</span></div>
+        <div class="stat"><b style="color:${p.alert?'var(--red)':'var(--green)'}">${p.alert?'✗':'✓'}</b><span>最近 CI</span></div>
+      </div>
+      <div class="card md"><h3>README.md</h3>
+        <p>以 <code>项目 ↔ worktree ↔ issue/PR</code> 关系为主轴的 GitHub 桌面客户端。clone 自己的仓库（含私有）、管 worktree 和分支、管 issue / PR / Actions，Win + Mac。</p>
+        <h3>快速开始</h3><p><code>pnpm install && pnpm tauri dev</code></p>
+      </div>`;
+  }
+  else if(tab==='Worktrees & Branches'){
+    body = `<h2>Worktrees & Branches</h2><div class="two-col">
+      <div>${p.checkouts.map(c=>`
+        <div class="co-card">
+          <h4>${c.primary?'⌂':'⎇'} ${c.branch} ${c.primary?'<span class="badge b-primary">primary</span>':''} ${ciDot(c.ci)}</h4>
+          <div class="meta">${c.path}<br>${c.ab||'与远程同步'} ${c.link?`· 关联 ${c.link.t==='issue'?'#'+c.link.n:'!'+c.link.n}`:''}</div>
+          <div class="ops">
+            <button class="btn sm" data-open="${c.id}">编辑器</button>
+            <button class="btn sm" data-term="${c.id}">终端</button>
+            ${c.link?`<button class="btn sm primary">创建 PR</button>`:''}
+            ${c.primary?'':`<button class="btn sm" data-del="${c.id}">删除</button>`}
+          </div>
+        </div>`).join('')}
+        <button class="btn">＋ 新建 worktree</button></div>
+      <div><table><tr><th>分支</th><th>ahead/behind</th><th>最后提交</th><th></th></tr>
+        ${[['main','','2 小时前'],['fix/123-sidebar-lag','<span style="color:var(--green)">↑2</span>','1 小时前'],['feat/dark-mode','<span style="color:var(--green)">↑5</span><span style="color:var(--red)">↓1</span>','3 小时前'],['origin/release/v0.3','—','上周']]
+          .map(([b,ab,t])=>`<tr><td>${b}</td><td>${ab}</td><td class="id">${t}</td><td><button class="btn sm">⎇ 开 worktree</button></td></tr>`).join('')}
+      </table></div></div>`;
+  }
+  else if(tab==='Issues'){
+    body = `<h2>Issues</h2><div class="card" style="padding:4px 0"><table>
+      <tr><th>#</th><th>标题</th><th>标签</th><th>负责人</th><th>关联 worktree</th><th></th></tr>
+      ${ISSUES.map(i=>`<tr>
+        <td class="id">#${i.n}</td>
+        <td><span class="${i.st==='open'?'st-open':'st-closed'}">●</span> ${i.t}</td>
+        <td>${i.labels.map(([t,c])=>`<span class="label-chip" style="color:${c};border-color:${c}40">${t}</span>`).join('')}</td>
+        <td class="id">${i.as}</td>
+        <td>${i.co?`<span class="badge b-issue">⎇ ${i.co}</span>`:'—'}</td>
+        <td>${i.co?`<button class="btn sm" data-goto-co="${i.co}">跳转</button>`:`<button class="btn sm primary" data-spawn="${i.n}">开 worktree</button>`}</td>
+      </tr>`).join('')}</table></div>`;
+  }
+  else if(tab==='Pull Requests'){
+    body = `<h2>Pull Requests</h2><div class="card" style="padding:4px 0"><table>
+      <tr><th>#</th><th>标题</th><th>checks</th><th>review</th><th>关联 worktree</th><th></th></tr>
+      ${PRS.map(r=>`<tr>
+        <td class="id">#${r.n}</td>
+        <td><span class="${r.st==='merged'?'st-merged':'st-open'}">${r.st==='merged'?'⇄':'●'}</span> ${r.t}</td>
+        <td>${ciDot(r.checks)}</td><td class="id">${r.review}</td>
+        <td>${r.co?`<span class="badge b-pr">⎇ ${r.co}</span>`:'—'}</td>
+        <td>${r.st!=='merged'?(r.co?`<button class="btn sm" data-goto-co="${r.co}">跳转</button>`:`<button class="btn sm primary" data-spawn-pr="${r.n}">开 worktree review</button>`):''}</td>
+      </tr>`).join('')}</table></div>`;
+  }
+  else if(tab==='Actions'){
+    const wf = WORKFLOWS[curWf];
+    body = `<h2>Actions</h2><div class="actions-wrap">
+      <div class="card" style="padding:6px">${WORKFLOWS.map((w,i)=>`
+        <div class="wf${i===curWf?' on':''}" data-wf="${i}"><span>${w.n}</span>${ciDot(w.runs[0].st)}</div>`).join('')}
+        <div style="padding:8px"><button class="btn sm" style="width:100%">▶ 手动 dispatch</button></div></div>
+      <div class="card" style="padding:4px 0">
+        ${wf.runs.map(r=>`<div class="run">${ciDot(r.st)}
+          <span class="grow"><b>${r.id}</b> · ${r.b}<div class="t">${r.by} · ${r.t}</div></span>
+          <button class="btn sm">日志</button>
+          ${r.st==='fail'?`<button class="btn sm">↻ rerun</button>`:''}
+          ${r.st==='run'?`<button class="btn sm">✕ cancel</button>`:''}
+        </div>`).join('')}
+      </div></div>`;
+  }
+  m.innerHTML = tabsBar() + `<div class="content"><div class="crumb">Projects / <b>${p.name}</b> / ${tab}</div>${body}</div>`;
+}
+
+function fakeCode(fname){
+  if(fname.endsWith('.md')) return `# 方案-GitHub项目管理应用\n\n## 4. UI 设计\nrepo 下是 checkout 列表：第一项是原仓库（非 worktree），\n其余是 worktree；每个条目可就地展开文件树。`;
+  if(fname.endsWith('.json')) return `{\n  "name": "gh-projects",\n  "private": true,\n  "scripts": { "dev": "tauri dev" }\n}`;
+  return `// ${fname}\nimport { buildRows } from './sidebar/rows';\n\nexport function Sidebar() {\n  const rows = buildRows(projects, groupBy, expanded);\n  return <VirtualList rows={rows} />;\n}`;
+}
+
+/* ================= 右侧文件树 panel ================= */
+// 当前文件树目标：选中的 checkout；选中项目时取其主 clone；选中文件时取其所属 checkout
+function activeCheckout(){
+  if(sel.kind==='checkout') return findCo(sel.cid);
+  if(sel.kind==='file') return findCo(sel.co);
+  if(sel.kind==='project'){
+    const p = P.find(x=>x.id===sel.pid);
+    const c = p && p.checkouts.find(x=>x.primary);
+    return c ? {p, c} : null;
+  }
+  return null;
+}
+
+function renderCtx(){
+  const c = $('#ctx');
+  if(view==='github'){ c.innerHTML = `<div class="ctx-empty">选择仓库后可 clone<br>到 ~/gh-projects/</div>`; return; }
+  const hit = activeCheckout();
+  if(!hit){ c.innerHTML = `<div class="ctx-empty">选中一个 checkout<br>查看它的目录文件</div>`; return; }
+  const {p, c:co} = hit;
+  const checks = co.ci==='ok' ? [['build','ok'],['test','ok'],['lint','ok']]
+    : co.ci==='fail' ? [['build','ok'],['test','fail'],['lint','ok']]
+    : [['build','ok'],['test','run'],['lint','run']];
+  c.innerHTML = `
+    <div class="ctx-head">
+      <h3>${co.primary?'⌂':'⎇'} ${p.name} / ${co.branch} ${co.primary?'<span class="badge b-primary">primary</span>':''}</h3>
+      <div class="path">${co.path}</div>
+      <div class="check-row" style="flex-wrap:wrap">${linkBadge(co.link)}
+        ${checks.map(([n,s])=>`${ciDot(s)}<span style="color:var(--muted)">${n}</span>`).join('')}
+      </div>
+      <div class="ops">
+        <button class="btn sm" data-open="${co.id}">编辑器</button>
+        <button class="btn sm" data-term="${co.id}">终端</button>
+        ${co.link?'<button class="btn sm primary">创建 PR</button>':''}
+        ${co.primary?'':'<button class="btn sm" data-del="'+co.id+'" style="color:var(--red)">删除</button>'}
+      </div>
+    </div>
+    <div class="ctx-tree">${fileRows(co, co.files, '', 0)}</div>`;
+}
+
+/* ================= 事件 ================= */
+function renderAll(){ renderSidebar(); renderMain(); renderCtx(); }
+
+document.addEventListener('click', e=>{
+  const t = e.target.closest('[data-proj],[data-ptoggle],[data-co],[data-dir],[data-file],[data-tab],[data-wf],[data-clone],[data-open],[data-term],[data-del],[data-web],[data-spawn],[data-spawn-pr],[data-goto-co],[data-issue],[data-pr],.nav-chip');
+  if(!t) return;
+  const d = t.dataset;
+
+  if(t.id==='nav-github'){ view='github'; $('#nav-github').classList.add('on'); $('#nav-projects').classList.remove('on'); renderAll(); return; }
+  if(t.id==='nav-projects'){ view='projects'; $('#nav-projects').classList.add('on'); $('#nav-github').classList.remove('on'); renderAll(); return; }
+  if(d.ptoggle){ const p=P.find(x=>x.id===d.ptoggle); p.open=!p.open; renderAll(); return; }
+  if(d.proj){ sel={kind:'project',pid:d.proj}; tab='Overview'; renderAll(); return; }
+  if(d.dir){ e.stopPropagation(); expandedDirs.has(d.dir)?expandedDirs.delete(d.dir):expandedDirs.add(d.dir); renderAll(); return; }
+  if(d.file){ e.stopPropagation(); sel={kind:'file',key:d.file,co:d.co}; renderAll(); return; }
+  if(d.co && !d.file && !d.dir){ sel={kind:'checkout',cid:d.co}; if(view!=='projects'){view='projects';} renderAll(); return; }
+  if(d.tab){ tab=d.tab; renderMain(); return; }
+  if(d.wf){ curWf=+d.wf; renderMain(); return; }
+  if(d.open!==undefined){ toast(`已在编辑器打开 ${findCo(d.open).c.path}`); return; }
+  if(d.term!==undefined){ toast(`已在终端打开 ${findCo(d.term).c.path}`); return; }
+  if(d.web){ toast('已在浏览器打开 github.com/'+P.find(x=>x.id===d.web).owner+'/'+P.find(x=>x.id===d.web).name); return; }
+  if(d.del){ e.stopPropagation(); const {p,c}=findCo(d.del);
+    if(confirm(`删除 worktree「${c.branch}」？\n\n[确定] 移入回收站（文件可从回收站恢复）\n[取消] 不动`)){
+      p.checkouts = p.checkouts.filter(x=>x.id!==d.del);
+      if(sel.cid===d.del) sel={kind:'project',pid:p.id};
+      toast(`已删除 worktree（回收站）：${c.path}`); renderAll();
+    } return; }
+  if(d.clone){ const r=MY_REPOS.find(x=>x.name===d.clone); r.cloned=true;
+    P.push({id:'p'+(P.length+1), name:r.name, owner:'coconilu', priv:r.priv, color:'#3fb950', open:true, alert:false,
+      checkouts:[{id:'c'+(Date.now()), branch:'main', primary:true, ci:'ok', ab:'', link:null, unread:false, status:'进行中', path:'~/gh-projects/'+r.name, open:true, files:FILESET}]});
+    toast(`已 clone 到 ~/gh-projects/${r.name} 并加入 Projects`); renderAll(); return; }
+  if(d.spawn){ // 从 issue 开 worktree
+    const p=P[0], iss=ISSUES.find(i=>i.n===+d.spawn);
+    const branch=`fix/${iss.n}-${iss.t.slice(0,6)}`;
+    p.checkouts.push({id:'c'+Date.now(), branch, primary:false, ci:'run', ab:'↑0', link:{t:'issue',n:iss.n}, unread:false, status:'进行中', path:`~/gh-projects/${p.name}.worktrees/fix-${iss.n}`, open:true, files:FILESET});
+    iss.co=branch; p.open=true;
+    toast(`已创建 worktree ${branch} 并关联 #${iss.n}`);
+    view='projects'; renderAll(); return; }
+  if(d.spawnPr){ toast('已为 PR #'+d.spawnPr+' 创建 review worktree（base 已自动解析）'); return; }
+  if(d.gotoCo){ const hit=(()=>{for(const p of P)for(const c of p.checkouts)if(c.branch===d.gotoCo)return{p,c}})();
+    if(hit){ hit.p.open=true; sel={kind:'checkout',cid:hit.c.id}; view='projects'; renderAll(); } return; }
+  if(d.issue){ tab='Issues'; sel={kind:'project',pid:'p1'}; renderAll(); return; }
+  if(d.pr){ tab='Pull Requests'; sel={kind:'project',pid:'p1'}; renderAll(); return; }
+});
+$('#groupby').addEventListener('change', e=>{ groupby=e.target.value; renderSidebar(); });
+
+// 支持用 hash 指定初始视图，便于截图/分享：#issues / #actions / #worktrees / #github
+const h=location.hash.slice(1);
+if(h==='issues')tab='Issues';
+if(h==='actions')tab='Actions';
+if(h==='worktrees')tab='Worktrees & Branches';
+if(h==='github'){view='github';$('#nav-github').classList.add('on');$('#nav-projects').classList.remove('on');}
+
+renderAll();
+</script>
+</body>
+</html>
