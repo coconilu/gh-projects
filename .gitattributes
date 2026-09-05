@@ -1,0 +1,8 @@
+# 全仓库统一 LF 行尾：CI 在 windows-latest 上跑 Biome，避免 CRLF 检出导致 format 检查误报
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.dll binary
