@@ -1,12 +1,15 @@
 import { listen } from "@tauri-apps/api/event";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useCallback, useEffect, useState } from "react";
+import { addLocalFolder, CheckoutActions } from "./components/CheckoutActions";
 import { Dialog, Toast } from "./components/Dialog";
 import FilePreview from "./components/FilePreview";
 import FileTreePanel from "./components/FileTreePanel";
 import LoginScreen from "./components/LoginScreen";
 import MyGitHub from "./components/MyGitHub";
-import ProjectDetail from "./components/ProjectDetail";
+import ProjectDetail, { ProjectTabs } from "./components/ProjectDetail";
+import ResizeHandle from "./components/ResizeHandle";
+import { ResourceState } from "./components/ResourceState";
 import Sidebar from "./components/Sidebar";
 import { activeCheckout, useStore } from "./store";
 
@@ -21,13 +24,17 @@ export default function App() {
 		setCloneProgress,
 		refreshCi,
 		refreshStatusMap,
+		layout,
+		setLayout,
+		projectsError,
+		projectsLoading,
+		refreshProjects,
 	} = useStore();
 	const [update, setUpdate] = useState<Update | null>(null);
 	const [updateState, setUpdateState] = useState<"idle" | "busy" | "error">(
 		"idle",
 	);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: init 等是稳定的 store 函数，只需挂载时执行一次
 	useEffect(() => {
 		init();
 		const un = listen<string>("clone-progress", (e) =>
@@ -36,7 +43,7 @@ export default function App() {
 		return () => {
 			un.then((f) => f());
 		};
-	}, []);
+	}, [init, setCloneProgress]);
 
 	// 启动时检查一次更新，此后每 30 分钟轮询；离线或检查失败不打扰用户
 	useEffect(() => {
@@ -66,15 +73,16 @@ export default function App() {
 		}
 	}, [update]);
 
-	// 选中 checkout / 项目时：刷新文件状态与 CI 点
-	// biome-ignore lint/correctness/useExhaustiveDependencies: projects.length 是项目列表变化的手动信号
+	const selectedCheckout = activeCheckout(projects, sel);
+	const selectedCid = selectedCheckout?.c.id;
+	// 切换工作树或显式刷新项目后读取状态；仅切换同一工作树内的文件不重复请求。
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 以 checkout id 和项目快照作为刷新边界
 	useEffect(() => {
-		const hit = activeCheckout(projects, sel);
-		if (hit) {
-			refreshStatusMap(hit.c);
-			if (sel?.kind === "project") refreshCi(hit.p);
+		if (selectedCheckout) {
+			refreshStatusMap(selectedCheckout.c);
+			refreshCi(selectedCheckout.p);
 		}
-	}, [sel, projects.length]);
+	}, [selectedCid, projects]);
 
 	if (!authLoaded)
 		return (
@@ -106,29 +114,122 @@ export default function App() {
 				: projects[0]?.id;
 	const project = projects.find((x) => x.id === pid) ?? projects[0];
 
+	const hit = activeCheckout(projects, sel);
 	return (
-		<div className="app">
-			<Sidebar />
-			<section className="main">
+		<div
+			className="app"
+			style={
+				{
+					"--sidebar-width": layout.sidebarWidth + "px",
+					"--files-width": layout.filesWidth + "px",
+				} as React.CSSProperties
+			}
+		>
+			{layout.sidebarOpen && (
+				<>
+					<Sidebar />
+					<ResizeHandle
+						label="项目面板宽度"
+						min={200}
+						max={340}
+						value={layout.sidebarWidth}
+						onChange={(sidebarWidth) => setLayout({ sidebarWidth })}
+					/>
+				</>
+			)}
+			{layout.sidebarOpen && (
+				<button
+					className="sidebar-scrim"
+					aria-label="关闭浮动项目面板"
+					onClick={() => setLayout({ sidebarOpen: false })}
+				/>
+			)}
+			<main className="main">
+				<header className="workspace-header">
+					<button
+						className="btn sm"
+						aria-label={layout.sidebarOpen ? "收起项目面板" : "显示项目面板"}
+						aria-expanded={layout.sidebarOpen}
+						onClick={() => setLayout({ sidebarOpen: !layout.sidebarOpen })}
+					>
+						项目
+					</button>
+					<div className="workspace-identity">
+						<strong>
+							{view === "github"
+								? "GitHub 仓库"
+								: (project?.name ?? "本地项目")}
+						</strong>
+						<span>
+							{view === "github"
+								? "查找仓库，开始本地工作"
+								: hit
+									? hit.c.branch +
+										(hit.c.isPrimary ? " · 主工作区" : " · 工作树")
+									: "添加项目开始工作"}
+						</span>
+					</div>
+					{view === "projects" && hit && (
+						<CheckoutActions p={hit.p} c={hit.c} />
+					)}
+					{view === "projects" && (
+						<button
+							className={"btn sm" + (layout.filesOpen ? " active" : "")}
+							disabled={!hit}
+							aria-expanded={layout.filesOpen}
+							aria-label={layout.filesOpen ? "收起文件面板" : "显示文件面板"}
+							onClick={() => setLayout({ filesOpen: !layout.filesOpen })}
+						>
+							文件
+						</button>
+					)}
+				</header>
 				{view === "github" ? (
 					<MyGitHub />
-				) : sel?.kind === "file" ? (
-					<FilePreview fkey={sel.key} co={sel.co} />
 				) : project ? (
-					<ProjectDetail key={project.id} p={project} />
+					<>
+						<ProjectTabs />
+						{sel?.kind === "file" ? (
+							<FilePreview fkey={sel.key} co={sel.co} />
+						) : (
+							<ProjectDetail key={project.id} p={project} />
+						)}
+					</>
 				) : (
 					<div className="content">
-						<div className="card" style={{ textAlign: "center", padding: 40 }}>
-							<h2>还没有项目</h2>
-							<p style={{ color: "var(--muted)" }}>
-								打开左侧 My GitHub，clone 一个仓库开始；或 Add local folder
-								添加已有目录。
-							</p>
-						</div>
+						<ResourceState
+							loading={projectsLoading}
+							error={projectsError}
+							onRetry={() => refreshProjects()}
+							title="还没有项目"
+							detail="添加已有 Git 仓库，或从 GitHub 克隆一个仓库。"
+							action={
+								<button className="btn primary" onClick={addLocalFolder}>
+									添加本地项目
+								</button>
+							}
+						/>
 					</div>
 				)}
-			</section>
-			<FileTreePanel />
+			</main>
+			{view === "projects" && hit && layout.filesOpen && (
+				<>
+					<ResizeHandle
+						label="文件面板宽度"
+						min={240}
+						max={420}
+						value={layout.filesWidth}
+						reverse
+						onChange={(filesWidth) => setLayout({ filesWidth })}
+					/>
+					<button
+						className="files-scrim"
+						aria-label="关闭浮动文件面板"
+						onClick={() => setLayout({ filesOpen: false })}
+					/>
+					<FileTreePanel />
+				</>
+			)}
 			<Toast />
 			<Dialog />
 			<UpdateToast

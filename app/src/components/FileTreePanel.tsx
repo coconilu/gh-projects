@@ -1,214 +1,361 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { fileIconUrl, folderIconUrl } from "../fileIcons";
 import { activeCheckout, useStore } from "../store";
-import type { CheckoutInfo, DirEntry, Project } from "../types";
-import { useCoOps } from "./ProjectDetail";
-import { LinkBadge } from "./Sidebar";
+import type { DirEntry } from "../types";
+import { ResourceState } from "./ResourceState";
 
-interface Menu {
+type Menu = {
 	x: number;
 	y: number;
-	absPath: string;
+	path: string;
 	isDir: boolean;
-}
-
+	source: HTMLElement;
+};
 export default function FileTreePanel() {
-	const { view, projects, sel, ci, refreshStatusMap, statusMaps, toast } =
-		useStore();
+	const {
+		projects,
+		sel,
+		setSel,
+		setLayout,
+		statusMaps,
+		statusErrors,
+		refreshStatusMap,
+		toast,
+	} = useStore();
 	const hit = activeCheckout(projects, sel);
+	const cid = hit?.c.id ?? "";
+	const path = hit?.c.path ?? "";
+	const current = useRef(cid);
+	current.current = cid;
 	const [nodes, setNodes] = useState<Record<string, DirEntry[]>>({});
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
+	const [errors, setErrors] = useState<Record<string, string>>({});
+	const [loading, setLoading] = useState(true);
+	const [revision, setRevision] = useState(0);
 	const [menu, setMenu] = useState<Menu | null>(null);
-
-	const cid = hit?.c.id;
-	const coPath = hit?.c.path;
-
-	// 展开状态按 checkout 持久化
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 仅在切换 checkout（cid 变化）时重置面板状态
+	const menuRef = useRef<HTMLDivElement>(null);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: revision 用于手动刷新目录
 	useEffect(() => {
-		if (!cid) return;
-		try {
-			const raw = localStorage.getItem(`gh-projects.expanded.${cid}`);
-			setExpanded(new Set(raw ? (JSON.parse(raw) as string[]) : []));
-		} catch {
-			setExpanded(new Set());
-		}
+		let active = true;
 		setNodes({});
-		if (coPath) {
-			api
-				.readDir(coPath)
-				.then((list) => setNodes((m) => ({ ...m, "": list })))
-				.catch(() => {});
+		setErrors({});
+		setLoading(true);
+		setMenu(null);
+		let saved: string[] = [];
+		try {
+			const raw = JSON.parse(
+				localStorage.getItem("gh-projects.expanded." + cid) ?? "[]",
+			);
+			if (Array.isArray(raw)) saved = raw.filter((v) => typeof v === "string");
+		} catch {
+			/* 展开状态不可用时从根目录开始 */
 		}
-	}, [cid]);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 仅在切换 checkout（cid 变化）时刷新文件状态
+		setExpanded(new Set(saved));
+		api.readDir(path).then(
+			async (root) => {
+				if (!active) return;
+				setNodes({ "": root });
+				setLoading(false);
+				for (let i = 0; i < saved.length; i += 4)
+					await Promise.all(
+						saved.slice(i, i + 4).map(async (rel) => {
+							try {
+								const entries = await api.readDir(path + "/" + rel);
+								if (active) setNodes((n) => ({ ...n, [rel]: entries }));
+							} catch (e) {
+								if (active) setErrors((v) => ({ ...v, [rel]: String(e) }));
+							}
+						}),
+					);
+			},
+			(e) => {
+				if (active) {
+					setErrors({ "": String(e) });
+					setLoading(false);
+				}
+			},
+		);
+		return () => {
+			active = false;
+		};
+	}, [cid, path, revision]);
 	useEffect(() => {
-		if (hit) refreshStatusMap(hit.c);
-	}, [cid]);
-
-	if (view === "github")
-		return (
-			<aside className="ctx">
-				<div className="ctx-empty">
-					选择仓库后可 clone
-					<br />到 ~/gh-projects/
-				</div>
-			</aside>
-		);
-	if (!hit)
-		return (
-			<aside className="ctx">
-				<div className="ctx-empty">
-					选中一个 checkout
-					<br />
-					查看它的目录文件
-				</div>
-			</aside>
-		);
-
-	const { p, c } = hit;
-	const smap = statusMaps[c.id];
-
-	const persist = (s: Set<string>) => {
-		setExpanded(s);
-		localStorage.setItem(
-			`gh-projects.expanded.${c.id}`,
-			JSON.stringify([...s]),
-		);
+		if (!menu) return;
+		menuRef.current?.querySelector("button")?.focus();
+		const close = (e: PointerEvent) => {
+			if (!menuRef.current?.contains(e.target as Node)) setMenu(null);
+		};
+		document.addEventListener("pointerdown", close);
+		return () => document.removeEventListener("pointerdown", close);
+	}, [menu]);
+	if (!hit) return null;
+	const smap = statusMaps[cid];
+	const persist = (next: Set<string>) => {
+		setExpanded(next);
+		try {
+			localStorage.setItem(
+				"gh-projects.expanded." + cid,
+				JSON.stringify([...next]),
+			);
+		} catch {
+			/* 保留会话状态 */
+		}
 	};
-
-	const toggleDir = async (rel: string) => {
+	const readFolder = async (rel: string) => {
+		const requestCid = cid;
+		setErrors((e) => ({ ...e, [rel]: "" }));
+		try {
+			const list = await api.readDir(path + "/" + rel);
+			if (current.current === requestCid)
+				setNodes((n) => ({ ...n, [rel]: list }));
+		} catch (e) {
+			if (current.current === requestCid)
+				setErrors((v) => ({ ...v, [rel]: String(e) }));
+		}
+	};
+	const toggle = (rel: string) => {
 		const next = new Set(expanded);
-		if (next.has(rel)) {
-			next.delete(rel);
-			persist(next);
-			return;
+		if (next.has(rel)) next.delete(rel);
+		else {
+			next.add(rel);
+			if (!nodes[rel]) void readFolder(rel);
 		}
-		next.add(rel);
 		persist(next);
-		if (!nodes[rel]) {
-			try {
-				const list = await api.readDir(`${c.path}/${rel}`);
-				setNodes((m) => ({ ...m, [rel]: list }));
-			} catch (e) {
-				toast(`读取目录失败: ${e}`);
-			}
-		}
 	};
-
-	const isIgnored = (rel: string, name: string) => {
-		if (name === ".git") return true;
-		if (!smap) return false;
-		return smap.ignored.some((ig) => rel === ig || rel.startsWith(`${ig}/`));
+	const showMenu = (
+		source: HTMLElement,
+		abs: string,
+		isDir: boolean,
+		x?: number,
+		y?: number,
+	) => {
+		const rect = source.getBoundingClientRect();
+		setMenu({
+			path: abs,
+			isDir,
+			source,
+			x: Math.max(0, Math.min(x ?? rect.left, window.innerWidth - 210)),
+			y: Math.max(0, Math.min(y ?? rect.bottom, window.innerHeight - 150)),
+		});
 	};
-
-	const changeCode = (rel: string) =>
-		smap?.changes.find((ch) => ch.path === rel)?.code ?? null;
-
-	const renderRows = (base: string, depth: number): React.ReactNode => {
-		const list = (nodes[base] ?? []).filter(
-			(e) => !(depth === 0 && e.name === ".git"),
-		);
-		return list.map((f) => {
-			const rel = base ? `${base}/${f.name}` : f.name;
-			const pad = 4 + depth * 16;
-			const ignored = isIgnored(rel, f.name);
-			const abs = `${c.path}/${rel}`;
-			if (f.isDir) {
-				const open = expanded.has(rel);
-				return (
-					<div key={rel}>
-						<div
-							className={`row file${ignored ? " ignored" : ""}`}
-							style={{ paddingLeft: pad }}
-							onClick={() => toggleDir(rel)}
-							onContextMenu={(e) => {
-								e.preventDefault();
-								setMenu({
-									x: e.clientX,
-									y: e.clientY,
-									absPath: abs,
-									isDir: true,
-								});
-							}}
-						>
-							<span className="twisty">{open ? "▼" : "▶"}</span>
-							<img
-								className="ficon"
-								src={folderIconUrl(f.name, open)}
-								alt=""
-								draggable={false}
-							/>
-							<span className="fname">{f.name}</span>
-						</div>
-						{open && renderRows(rel, depth + 1)}
-					</div>
-				);
-			}
-			const gs = changeCode(rel);
-			const key = `${c.id}/${rel}`;
-			const seld = sel?.kind === "file" && sel.key === key;
+	const rows = (base: string, depth: number): React.ReactNode => {
+		if (errors[base])
 			return (
-				<div
-					key={rel}
-					className={`row file${ignored ? " ignored" : ""}${seld ? " sel" : ""}`}
-					style={{ paddingLeft: pad }}
-					onClick={() =>
-						useStore.getState().setSel({ kind: "file", key, co: c.id })
-					}
-					onDoubleClick={() =>
-						api.openInEditor(abs).catch((e) => toast(`${e}`))
-					}
-					onContextMenu={(e) => {
-						e.preventDefault();
-						setMenu({ x: e.clientX, y: e.clientY, absPath: abs, isDir: false });
-					}}
-				>
-					<span className="twisty"></span>
-					<img
-						className="ficon"
-						src={fileIconUrl(f.name)}
-						alt=""
-						draggable={false}
-					/>
-					<span className="fname">{f.name}</span>
-					{gs && <span className={`gs ${gs}`}>{gs}</span>}
+				<div className="folder-error" role="alert">
+					{errors[base]}
+					<button className="btn sm" onClick={() => readFolder(base)}>
+						重试目录
+					</button>
+				</div>
+			);
+		if (!nodes[base])
+			return (
+				<div className="hint" role="status">
+					读取目录…
+				</div>
+			);
+		const list = nodes[base].filter((f) => f.name !== ".git");
+		if (!list.length) return <div className="hint">空目录</div>;
+		return list.map((f) => {
+			const rel = base ? base + "/" + f.name : f.name;
+			const abs = path + "/" + rel;
+			const key = cid + "/" + rel;
+			const ignored = smap?.ignored.some(
+				(p) => rel === p || rel.startsWith(p + "/"),
+			);
+			const code = smap?.changes.find((c) => c.path === rel)?.code;
+			const selected = sel?.kind === "file" && sel.key === key;
+			const open = expanded.has(rel);
+			return (
+				<div key={rel}>
+					<button
+						role="treeitem"
+						aria-expanded={f.isDir ? open : undefined}
+						aria-selected={selected}
+						className={
+							"row file" +
+							(selected ? " sel" : "") +
+							(ignored ? " ignored" : "")
+						}
+						style={{ paddingLeft: 8 + depth * 16 }}
+						title={rel}
+						onClick={() =>
+							f.isDir ? toggle(rel) : setSel({ kind: "file", key, co: cid })
+						}
+						onDoubleClick={() =>
+							!f.isDir && api.openInEditor(abs).catch((e) => toast(String(e)))
+						}
+						onContextMenu={(e) => {
+							e.preventDefault();
+							showMenu(e.currentTarget, abs, f.isDir, e.clientX, e.clientY);
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+								e.preventDefault();
+								showMenu(e.currentTarget, abs, f.isDir);
+							}
+							if (
+								f.isDir &&
+								((e.key === "ArrowRight" && !open) ||
+									(e.key === "ArrowLeft" && open))
+							) {
+								e.preventDefault();
+								toggle(rel);
+							}
+							if (["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) {
+								e.preventDefault();
+								const items = Array.from(
+									e.currentTarget
+										.closest('[role="tree"]')!
+										.querySelectorAll<HTMLButtonElement>('[role="treeitem"]'),
+								);
+								const index = items.indexOf(e.currentTarget);
+								items[
+									e.key === "Home"
+										? 0
+										: e.key === "End"
+											? items.length - 1
+											: Math.max(
+													0,
+													Math.min(
+														items.length - 1,
+														index + (e.key === "ArrowDown" ? 1 : -1),
+													),
+												)
+								]?.focus();
+							}
+						}}
+					>
+						<span className="twisty" aria-hidden="true">
+							{f.isDir ? (open ? "⌄" : "›") : ""}
+						</span>
+						<img
+							className="ficon"
+							src={f.isDir ? folderIconUrl(f.name, open) : fileIconUrl(f.name)}
+							alt=""
+							draggable={false}
+						/>
+						<span className="fname">{f.name}</span>
+						{code && (
+							<span className={"gs " + code} title={"Git 状态 " + code}>
+								{code}
+							</span>
+						)}
+					</button>
+					{f.isDir && open && (
+						// biome-ignore lint/a11y/useSemanticElements: 文件树的嵌套组不是表单字段集
+						<div role="group">{rows(rel, depth + 1)}</div>
+					)}
 				</div>
 			);
 		});
 	};
-
+	const menuAction = async (action: () => Promise<unknown>) => {
+		try {
+			await action();
+		} catch (e) {
+			toast(String(e));
+		}
+		menu?.source.focus();
+		setMenu(null);
+	};
 	return (
-		<aside className="ctx" onClick={() => menu && setMenu(null)}>
-			<CtxHead p={p} c={c} ci={ci[c.id]} />
-			<div className="ctx-tree">{renderRows("", 0)}</div>
-			{menu && (
-				<div className="ctx-menu" style={{ left: menu.x, top: menu.y }}>
+		<aside className="ctx" aria-label="当前工作树文件">
+			<div className="file-panel-heading">
+				<strong>文件</strong>
+				<div className="ops">
 					<button
+						className="btn sm"
+						aria-label="刷新文件"
 						onClick={() => {
-							navigator.clipboard.writeText(menu.absPath);
-							setMenu(null);
-							toast("已复制路径");
+							setRevision((n) => n + 1);
+							void refreshStatusMap(hit.c);
 						}}
+					>
+						刷新
+					</button>
+					<button
+						className="btn sm"
+						aria-label="关闭文件面板"
+						onClick={() => setLayout({ filesOpen: false })}
+					>
+						关闭
+					</button>
+				</div>
+			</div>
+			<div className="file-root path-text">{path}</div>
+			{statusErrors[cid] && (
+				<div className="folder-error" role="alert">
+					文件 Git 状态读取失败
+					<button className="btn sm" onClick={() => refreshStatusMap(hit.c)}>
+						重试
+					</button>
+				</div>
+			)}
+			<div className="ctx-tree">
+				{loading || errors[""] ? (
+					<ResourceState
+						loading={loading}
+						error={errors[""]}
+						onRetry={() => setRevision((n) => n + 1)}
+					/>
+				) : (
+					<div role="tree" aria-label={"文件树：" + hit.c.branch}>
+						{rows("", 0)}
+					</div>
+				)}
+			</div>
+			<div className="file-panel-foot">单击预览 · 双击用编辑器打开</div>
+			{menu && (
+				<div
+					ref={menuRef}
+					className="ctx-menu"
+					role="menu"
+					aria-label="文件操作"
+					style={{ left: menu.x, top: menu.y }}
+					onKeyDown={(e) => {
+						if (e.key === "Escape") {
+							e.preventDefault();
+							menu.source.focus();
+							setMenu(null);
+						}
+						if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+							e.preventDefault();
+							const buttons = Array.from(
+								e.currentTarget.querySelectorAll("button"),
+							);
+							const idx = buttons.indexOf(
+								document.activeElement as HTMLButtonElement,
+							);
+							buttons[
+								(idx + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) %
+									buttons.length
+							]?.focus();
+						}
+					}}
+				>
+					<button
+						role="menuitem"
+						onClick={() =>
+							menuAction(async () => {
+								await navigator.clipboard.writeText(menu.path);
+								toast("路径已复制");
+							})
+						}
 					>
 						复制路径
 					</button>
 					<button
-						onClick={() => {
-							api.revealInExplorer(menu.absPath).catch((e) => toast(`${e}`));
-							setMenu(null);
-						}}
+						role="menuitem"
+						onClick={() => menuAction(() => api.revealInExplorer(menu.path))}
 					>
 						在文件管理器显示
 					</button>
 					{!menu.isDir && (
 						<button
-							onClick={() => {
-								api.openInEditor(menu.absPath).catch((e) => toast(`${e}`));
-								setMenu(null);
-							}}
+							role="menuitem"
+							onClick={() => menuAction(() => api.openInEditor(menu.path))}
 						>
 							在编辑器打开
 						</button>
@@ -216,53 +363,5 @@ export default function FileTreePanel() {
 				</div>
 			)}
 		</aside>
-	);
-}
-
-function CtxHead({
-	p,
-	c,
-	ci,
-}: {
-	p: Project;
-	c: CheckoutInfo;
-	ci: string | null | undefined;
-}) {
-	const ops = useCoOps(p);
-	return (
-		<div className="ctx-head">
-			<h3>
-				{c.isPrimary ? "⌂" : "⎇"} {p.name} / {c.branch}{" "}
-				{c.isPrimary && <span className="badge b-primary">primary</span>}
-			</h3>
-			<div className="path">{c.path}</div>
-			<div className="check-row" style={{ flexWrap: "wrap" }}>
-				<LinkBadge link={c.linkedWorkItem} />
-				{ci && (
-					<>
-						<span className={`ci ${ci}`} />
-						<span style={{ color: "var(--muted)" }}>CI</span>
-					</>
-				)}
-			</div>
-			<div className="ops">
-				<button className="btn sm" onClick={() => ops.openEditor(c)}>
-					编辑器
-				</button>
-				<button className="btn sm" onClick={() => ops.openTerm(c)}>
-					终端
-				</button>
-				{!c.isPrimary && p.providerIdentity && (
-					<button className="btn sm primary" onClick={() => ops.createPr(c)}>
-						创建 PR
-					</button>
-				)}
-				{!c.isPrimary && (
-					<button className="btn sm danger" onClick={() => ops.del(c)}>
-						删除
-					</button>
-				)}
-			</div>
-		</div>
 	);
 }

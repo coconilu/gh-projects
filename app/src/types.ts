@@ -32,6 +32,7 @@ export interface Project {
 	forkOf: string | null;
 	color: string;
 	localPath: string;
+	defaultBranch: string;
 	addedAt: number;
 	checkouts: CheckoutInfo[];
 }
@@ -100,6 +101,20 @@ export interface WorkflowInfo {
 	state: string;
 }
 
+export interface WorkflowInput {
+	name: string;
+	description: string;
+	kind: string;
+	required: boolean;
+	defaultValue: string;
+	options: string[];
+}
+export interface WorkflowDetails {
+	defaultBranch: string;
+	dispatch: boolean;
+	inputs: WorkflowInput[];
+}
+
 export interface RunInfo {
 	id: number;
 	runNumber: number;
@@ -133,7 +148,15 @@ export interface CloneTargetInfo {
 	exists: boolean;
 }
 
-export type CiStatus = "ok" | "run" | "fail" | null;
+export type CiStatus =
+	| "ok"
+	| "run"
+	| "fail"
+	| "none"
+	| "unknown"
+	| "cancelled"
+	| "skipped"
+	| null;
 
 export type Selection =
 	| { kind: "project"; pid: string }

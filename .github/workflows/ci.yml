@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [master]
@@ -39,5 +40,15 @@ jobs:
         working-directory: app
         run: pnpm build
 
+      - name: Test release guards
+        run: node --test .github/scripts/*.test.mjs
+
+      - name: Test navigation
+        working-directory: app
+        run: pnpm test
+
       - name: Check Tauri shell (cargo check)
         run: cargo check --manifest-path app/src-tauri/Cargo.toml
+
+      - name: Test workflow metadata parser
+        run: cargo test --manifest-path app/src-tauri/Cargo.toml --lib
