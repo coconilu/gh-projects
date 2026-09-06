@@ -1,6 +1,7 @@
 mod fsx;
 mod git;
 mod github;
+mod launch;
 mod projects;
 mod store;
 
@@ -43,8 +44,11 @@ pub fn run() {
             fsx::read_file_preview,
             fsx::checkout_status,
             fsx::trash_path,
-            fsx::open_in_editor,
-            fsx::open_in_terminal,
+            launch::open_in_editor,
+            launch::open_in_terminal,
+            launch::get_launch_preferences,
+            launch::save_launch_preferences,
+            launch::discover_launch_apps,
             fsx::reveal_in_explorer,
             // issues / PRs
             github::list_issues,

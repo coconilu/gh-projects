@@ -10,6 +10,7 @@ import MyGitHub from "./components/MyGitHub";
 import ProjectDetail, { ProjectTabs } from "./components/ProjectDetail";
 import ResizeHandle from "./components/ResizeHandle";
 import { ResourceState } from "./components/ResourceState";
+import SettingsDialog from "./components/SettingsDialog";
 import Sidebar from "./components/Sidebar";
 import { activeCheckout, useStore } from "./store";
 
@@ -31,6 +32,7 @@ export default function App() {
 		refreshProjects,
 	} = useStore();
 	const [update, setUpdate] = useState<Update | null>(null);
+	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [updateState, setUpdateState] = useState<"idle" | "busy" | "error">(
 		"idle",
 	);
@@ -183,6 +185,13 @@ export default function App() {
 							文件
 						</button>
 					)}
+					<button
+						className="btn sm"
+						aria-label="打开配置"
+						onClick={() => setSettingsOpen(true)}
+					>
+						配置
+					</button>
 				</header>
 				{view === "github" ? (
 					<MyGitHub />
@@ -232,6 +241,9 @@ export default function App() {
 			)}
 			<Toast />
 			<Dialog />
+			{settingsOpen && (
+				<SettingsDialog onClose={() => setSettingsOpen(false)} />
+			)}
 			<UpdateToast
 				update={update}
 				state={updateState}

@@ -162,3 +162,14 @@ export type Selection =
 	| { kind: "project"; pid: string }
 	| { kind: "checkout"; cid: string }
 	| { kind: "file"; key: string; co: string };
+export interface LaunchPreferences {
+	editor: string;
+	terminal: string;
+}
+export interface LaunchApp {
+	id: string;
+	name: string;
+	kind: "editor" | "terminal";
+	path: string | null;
+	running: boolean | null;
+}
