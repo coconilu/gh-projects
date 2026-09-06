@@ -65,46 +65,6 @@ pub fn trash_path(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn open_in_editor(path: String) -> Result<(), String> {
-    use std::process::Stdio;
-    let mut c = git::new_cmd("code");
-    c.arg(&path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    if c.spawn().is_ok() {
-        return Ok(());
-    }
-    // 退路：记事本
-    let mut n = git::new_cmd("notepad");
-    n.arg(&path);
-    n.spawn().map_err(|e| format!("无法打开编辑器（未找到 code / notepad）: {e}"))?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn open_in_terminal(path: String) -> Result<(), String> {
-    use std::process::Stdio;
-    // 优先 Windows Terminal
-    let mut wt = git::new_cmd("wt");
-    wt.arg("-d").arg(&path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    if wt.spawn().is_ok() {
-        return Ok(());
-    }
-    // 退路：新开 cmd 窗口（外层 cmd 自身隐藏）
-    let mut c = git::new_cmd("cmd");
-    c.args(["/c", "start", "GitGrove", "/D", &path, "cmd", "/k"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    c.spawn().map_err(|e| format!("无法打开终端: {e}"))?;
-    Ok(())
-}
-
-#[tauri::command]
 pub fn reveal_in_explorer(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     let mut c = git::new_cmd("explorer");

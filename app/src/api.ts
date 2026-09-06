@@ -7,6 +7,8 @@ import type {
 	DirEntry,
 	FilePreview,
 	IssueInfo,
+	LaunchApp,
+	LaunchPreferences,
 	LinkedWorkItem,
 	PrInfo,
 	Project,
@@ -73,6 +75,12 @@ export const openInEditor = (path: string) =>
 	invoke<void>("open_in_editor", { path });
 export const openInTerminal = (path: string) =>
 	invoke<void>("open_in_terminal", { path });
+export const getLaunchPreferences = () =>
+	invoke<LaunchPreferences>("get_launch_preferences");
+export const saveLaunchPreferences = (preferences: LaunchPreferences) =>
+	invoke<LaunchPreferences>("save_launch_preferences", { preferences });
+export const discoverLaunchApps = () =>
+	invoke<LaunchApp[]>("discover_launch_apps");
 export const revealInExplorer = (path: string) =>
 	invoke<void>("reveal_in_explorer", { path });
 

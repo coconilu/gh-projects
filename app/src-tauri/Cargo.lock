@@ -1394,6 +1394,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "trash",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
