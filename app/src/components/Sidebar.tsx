@@ -224,8 +224,8 @@ export default function Sidebar() {
 	return (
 		<aside className="sidebar">
 			<div className="side-head">
-				<div className="logo">gh</div>
-				<b>gh-projects</b>
+				<div className="logo">gg</div>
+				<b>GitGrove</b>
 			</div>
 			<div className="side-nav">
 				<button

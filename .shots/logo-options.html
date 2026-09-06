@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 36px 28px; gap: 30px;
+  }
+  .card { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 280px; }
+  .icon { width: 200px; height: 200px; border-radius: 45px; box-shadow: 0 12px 32px rgba(0,0,0,.5); }
+  .name { color: #f0f3f6; font-size: 26px; font-weight: 700; letter-spacing: .5px; }
+  .cn { color: #9da7b3; font-size: 14px; }
+  .en { color: #6b7684; font-size: 12px; font-style: italic; text-align: center; }
+</style>
+</head>
+<body>
+
+<!-- 1. Grove：git 分支图抽象成一棵树 -->
+<div class="card">
+  <svg class="icon" viewBox="0 0 256 256">
+    <defs><linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#0f766e"/>
+    </linearGradient></defs>
+    <rect width="256" height="256" rx="56" fill="url(#g1)"/>
+    <g stroke="#fff" stroke-width="11" stroke-linecap="round" fill="none">
+      <path d="M128 218 L128 86"/>
+      <path d="M128 158 C 102 146 92 128 88 104"/>
+      <path d="M128 138 C 154 128 164 112 168 96"/>
+    </g>
+    <circle cx="128" cy="70" r="15" fill="#fff"/>
+    <circle cx="86" cy="92" r="12" fill="#fff"/>
+    <circle cx="170" cy="84" r="12" fill="#fff"/>
+    <circle cx="128" cy="218" r="10" fill="#fff"/>
+  </svg>
+  <div class="name">Grove</div>
+  <div class="cn">树丛 · 每个仓库一棵树，worktree 成林</div>
+  <div class="en">your repos, growing as a grove</div>
+</div>
+
+<!-- 2. Forklift：叉车搬运仓库 -->
+<div class="card">
+  <svg class="icon" viewBox="0 0 256 256">
+    <defs><linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbbf24"/><stop offset="1" stop-color="#ea580c"/>
+    </linearGradient></defs>
+    <rect width="256" height="256" rx="56" fill="url(#g2)"/>
+    <g fill="#fff">
+      <rect x="148" y="62" width="58" height="58" rx="10"/>
+      <rect x="130" y="52" width="10" height="138" rx="4"/>
+      <rect x="140" y="118" width="72" height="11" rx="5"/>
+      <rect x="42" y="122" width="80" height="58" rx="12"/>
+      <rect x="56" y="88" width="46" height="38" rx="9"/>
+      <circle cx="64" cy="192" r="16"/>
+      <circle cx="108" cy="192" r="16"/>
+    </g>
+    <g stroke="#ea580c" stroke-width="5" stroke-linecap="round" fill="none">
+      <path d="M168 106 L168 84 M168 92 L184 80"/>
+    </g>
+    <circle cx="168" cy="78" r="6" fill="#ea580c"/>
+    <circle cx="186" cy="76" r="6" fill="#ea580c"/>
+  </svg>
+  <div class="name">Forklift</div>
+  <div class="cn">叉车 · fork 别人的，运走自己的</div>
+  <div class="en">fork it. lift it. ship it.</div>
+</div>
+
+<!-- 3. Treehouse：长在分支上的工作台 -->
+<div class="card">
+  <svg class="icon" viewBox="0 0 256 256">
+    <defs><linearGradient id="g3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#155e75"/>
+    </linearGradient></defs>
+    <rect width="256" height="256" rx="56" fill="url(#g3)"/>
+    <g stroke="#fff" stroke-width="11" stroke-linecap="round" fill="none">
+      <path d="M92 218 L92 128"/>
+      <path d="M92 158 C 122 150 138 140 146 118"/>
+    </g>
+    <circle cx="150" cy="108" r="11" fill="#fff"/>
+    <g fill="#fff">
+      <path d="M56 74 L96 42 L136 74 Z"/>
+      <rect x="64" y="74" width="64" height="46" rx="8"/>
+    </g>
+    <rect x="88" y="94" width="16" height="26" rx="3" fill="#155e75"/>
+    <circle cx="92" cy="218" r="10" fill="#fff"/>
+  </svg>
+  <div class="name">Treehouse</div>
+  <div class="cn">树屋 · 住在 worktree 里的工作台</div>
+  <div class="en">a workshop in your worktrees</div>
+</div>
+
+<!-- 4. Canopy：树冠层覆盖所有项目 -->
+<div class="card">
+  <svg class="icon" viewBox="0 0 256 256">
+    <defs><linearGradient id="g4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4ade80"/><stop offset="1" stop-color="#15803d"/>
+    </linearGradient></defs>
+    <rect width="256" height="256" rx="56" fill="url(#g4)"/>
+    <g fill="#fff">
+      <circle cx="94" cy="104" r="36"/>
+      <circle cx="162" cy="104" r="36"/>
+      <circle cx="128" cy="74" r="38"/>
+    </g>
+    <path d="M128 132 L128 196" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+    <path d="M128 164 C 150 158 158 150 164 138" stroke="#fff" stroke-width="10" stroke-linecap="round" fill="none"/>
+    <circle cx="128" cy="204" r="10" fill="#fff"/>
+  </svg>
+  <div class="name">Canopy</div>
+  <div class="cn">树冠 · 一片树荫罩住所有项目与分支</div>
+  <div class="en">all your work under one canopy</div>
+</div>
+
+<!-- 5. Harbor：锚 + 分支分叉 -->
+<div class="card">
+  <svg class="icon" viewBox="0 0 256 256">
+    <defs><linearGradient id="g5" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#1e40af"/>
+    </linearGradient></defs>
+    <rect width="256" height="256" rx="56" fill="url(#g5)"/>
+    <g stroke="#fff" stroke-width="11" stroke-linecap="round" fill="none">
+      <path d="M128 66 L128 182"/>
+      <path d="M98 104 L158 104"/>
+      <path d="M80 138 C 80 176 102 198 128 198 C 154 198 176 176 176 138"/>
+      <path d="M80 138 L70 152 M80 138 L94 148"/>
+      <path d="M176 138 L186 152 M176 138 L162 148"/>
+    </g>
+    <circle cx="128" cy="54" r="13" fill="none" stroke="#fff" stroke-width="10"/>
+  </svg>
+  <div class="name">Harbor</div>
+  <div class="cn">港湾 · 所有仓库停靠的地方</div>
+  <div class="en">where your repos come to dock</div>
+</div>
+
+</body>
+</html>

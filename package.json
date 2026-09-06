@@ -1,5 +1,5 @@
 {
-	"name": "gh-projects-root",
+	"name": "gitgrove-root",
 	"private": true,
 	"packageManager": "pnpm@10.24.0",
 	"scripts": {

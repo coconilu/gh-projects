@@ -1,11 +1,11 @@
 [package]
-name = "gh-projects"
+name = "gitgrove"
 version = "0.1.0"
 description = "GitHub project & worktree manager"
 edition = "2021"
 
 [lib]
-name = "gh_projects_lib"
+name = "gitgrove_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

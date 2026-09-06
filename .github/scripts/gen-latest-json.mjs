@@ -15,7 +15,7 @@ if (!tag) {
 }
 
 const artifactsDir = process.argv[3] ?? "dist-release";
-const repo = process.env.GITHUB_REPOSITORY ?? "coconilu/gh-projects";
+const repo = process.env.GITHUB_REPOSITORY ?? "coconilu/gitgrove";
 const version = JSON.parse(fs.readFileSync("app/package.json", "utf8")).version;
 
 /** 在目录里找「安装包 + 同名 .sig」配对；目录不存在视为该平台未构建。 */
@@ -65,7 +65,7 @@ for (const [dir, suffix, platform] of targets) {
 
 const latest = {
 	version,
-	notes: `gh-projects ${tag}`,
+	notes: `GitGrove ${tag}`,
 	pub_date: new Date().toISOString(),
 	platforms,
 };

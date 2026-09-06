@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    gh_projects_lib::run()
+    gitgrove_lib::run()
 }

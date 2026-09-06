@@ -186,7 +186,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
-          name: gh-projects ${{ needs.version.outputs.tag }}
+          name: GitGrove ${{ needs.version.outputs.tag }}
           # issue 触发的构建标记为 prerelease，避免抢占 releases/latest（updater 端点）
           prerelease: ${{ github.event_name == 'issues' }}
           files: |

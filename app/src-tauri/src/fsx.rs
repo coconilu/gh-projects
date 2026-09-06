@@ -96,7 +96,7 @@ pub fn open_in_terminal(path: String) -> Result<(), String> {
     }
     // 退路：新开 cmd 窗口（外层 cmd 自身隐藏）
     let mut c = git::new_cmd("cmd");
-    c.args(["/c", "start", "gh-projects", "/D", &path, "cmd", "/k"])
+    c.args(["/c", "start", "GitGrove", "/D", &path, "cmd", "/k"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
