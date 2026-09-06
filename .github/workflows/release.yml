@@ -18,7 +18,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write # bump 步骤需要建 PR 并合并（master 受分支保护，bot 不能直推）
+  pull-requests: write # bump 在 master 受分支保护时回退走 PR 流程
 
 jobs:
   # 版本号 bump + 解析 release tag；构建和发布都以这里输出的 tag 为准
@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: 24
 
-      - name: Bump version & changelog (via auto-merged PR)
+      - name: Bump version & changelog
         id: bump
         if: github.event_name == 'workflow_dispatch' && inputs.bump != 'none'
         env:
@@ -46,26 +46,32 @@ jobs:
         run: |
           node .github/scripts/bump-version.mjs "$BUMP"
           VERSION=$(node -p "require('./app/package.json').version")
-          BRANCH="chore/release-v$VERSION"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b "$BRANCH"
           git add app/package.json app/src-tauri/tauri.conf.json CHANGELOG.md
           git commit -m "chore: release v$VERSION"
-          git push -u origin "$BRANCH"
-          gh pr create --title "chore: release v$VERSION" --body "自动版本号升级（release 工作流）" --base master --head "$BRANCH"
-          # 分支保护未设必需检查时可直接合并；设了就回退到 --auto 等 CI 通过后自动合并
-          if ! gh pr merge --squash --delete-branch "$BRANCH"; then
-            gh pr merge --squash --auto --delete-branch "$BRANCH"
-            echo "已开启 auto-merge，等待 CI 通过后自动合并…"
-            for i in $(seq 1 60); do
-              STATE=$(gh pr view "$BRANCH" --json state -q .state || true)
-              [ "$STATE" = "MERGED" ] && break
-              sleep 10
-            done
-            if [ "$STATE" != "MERGED" ]; then
-              echo "PR 未在预期时间内合并（state=$STATE）"
-              exit 1
+          # 优先直推 master（无分支保护时最快）；被拒绝再走 PR 流程
+          # PR 流程需要仓库设置：Settings → Actions → Allow GitHub Actions to create pull requests
+          if git push origin HEAD:master; then
+            echo "已直推 master"
+          else
+            BRANCH="chore/release-v$VERSION"
+            git checkout -b "$BRANCH"
+            git push -u origin "$BRANCH"
+            gh pr create --title "chore: release v$VERSION" --body "自动版本号升级（release 工作流）" --base master --head "$BRANCH"
+            # 分支保护未设必需检查时可直接合并；设了就回退到 --auto 等 CI 通过后自动合并
+            if ! gh pr merge --squash --delete-branch "$BRANCH"; then
+              gh pr merge --squash --auto --delete-branch "$BRANCH"
+              echo "已开启 auto-merge，等待 CI 通过后自动合并…"
+              for i in $(seq 1 60); do
+                STATE=$(gh pr view "$BRANCH" --json state -q .state || true)
+                [ "$STATE" = "MERGED" ] && break
+                sleep 10
+              done
+              if [ "$STATE" != "MERGED" ]; then
+                echo "PR 未在预期时间内合并（state=$STATE）"
+                exit 1
+              fi
             fi
           fi
 
