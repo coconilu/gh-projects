@@ -2,214 +2,224 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import * as api from "../api";
 import { useStore } from "../store";
-import type { RepoInfo } from "../types";
+import type { Project, RepoInfo } from "../types";
+import { ResourceState } from "./ResourceState";
 
 export default function MyGitHub() {
-	const {
-		auth,
-		myRepos,
-		projects,
-		refreshProjects,
-		refreshMyRepos,
-		reloadAuth,
-		cloneProgress,
-		setCloneProgress,
-		toast,
-		openDialog,
-		closeDialog,
-	} = useStore();
+	const s = useStore();
 	const [q, setQ] = useState("");
 	const [url, setUrl] = useState("");
 	const [busy, setBusy] = useState(false);
-
-	const cloned = new Set(
-		projects
-			.filter((p) => p.providerIdentity)
-			.map((p) =>
-				`${p.providerIdentity!.owner}/${p.providerIdentity!.repo}`.toLowerCase(),
-			),
+	const [error, setError] = useState("");
+	const list = (s.myRepos ?? []).filter((r) =>
+		(r.nameWithOwner + " " + (r.description ?? ""))
+			.toLowerCase()
+			.includes(q.trim().toLowerCase()),
 	);
-	const list = (myRepos ?? []).filter(
-		(r) =>
-			!q ||
-			r.nameWithOwner.toLowerCase().includes(q.toLowerCase()) ||
-			(r.description ?? "").toLowerCase().includes(q.toLowerCase()),
-	);
-
-	const doClone = async (cloneUrl: string, repoName: string) => {
-		const t = await api.checkCloneTarget(repoName);
-		if (t.exists) {
-			openDialog({
-				kind: "confirm",
-				title: "目录已存在",
-				message: `${t.target}\n已存在。是否直接把它添加为已有项目？`,
-				okText: "添加为已有项目",
-				onSubmit: async () => {
-					closeDialog();
-					try {
-						await api.addExistingProject(t.target);
-						await refreshProjects();
-						toast("已添加为已有项目");
-					} catch (e) {
-						toast(`添加失败: ${e}`);
-					}
-				},
-			});
-			return;
-		}
+	const added = (r: RepoInfo) =>
+		s.projects.find(
+			(p) =>
+				p.providerIdentity &&
+				(
+					p.providerIdentity.owner +
+					"/" +
+					p.providerIdentity.repo
+				).toLowerCase() === r.nameWithOwner.toLowerCase(),
+		);
+	const openAdded = async (project: Project) => {
+		await s.refreshProjects();
+		s.setSel({ kind: "project", pid: project.id });
+		s.setTab("Overview");
+		s.setView("projects");
+		s.toast("已打开项目 " + project.name);
+	};
+	const doClone = async (cloneUrl: string, repo: string) => {
+		if (busy) return;
 		setBusy(true);
-		setCloneProgress("准备克隆…");
+		setError("");
 		try {
-			await api.cloneRepo(cloneUrl, repoName);
-			await refreshProjects();
-			toast(`已 clone 到 ${t.target} 并加入 Projects`);
+			const target = await api.checkCloneTarget(repo);
+			if (target.exists) {
+				s.openDialog({
+					kind: "confirm",
+					title: "仓库目录已存在",
+					message: target.target + "\n可直接将这个目录添加到本地项目。",
+					okText: "添加并打开",
+					onSubmit: async () =>
+						openAdded(await api.addExistingProject(target.target)),
+				});
+				return;
+			}
+			s.setCloneProgress("正在克隆 " + repo + "…");
+			const project = await api.cloneRepo(cloneUrl, repo);
+			setUrl("");
+			await openAdded(project);
 		} catch (e) {
-			toast(`clone 失败: ${e}`);
+			setError(String(e));
 		} finally {
-			setCloneProgress(null);
 			setBusy(false);
+			s.setCloneProgress(null);
 		}
 	};
-
-	const cloneUrlRepo = async () => {
-		const u = url.trim();
-		const m = u.match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?\/?$/);
-		if (!m) {
-			toast("无法识别的 GitHub 仓库 URL");
+	const cloneUrl = () => {
+		const match = url
+			.trim()
+			.match(
+				/^(?:https?:\/\/github\.com\/|git@github\.com:)([^/\s]+)\/([^/\s]+?)\/?$/,
+			);
+		if (!match) {
+			setError("请输入有效的 GitHub 仓库地址");
 			return;
 		}
-		setUrl("");
-		await doClone(`https://github.com/${m[1]}/${m[2]}.git`, m[2]);
+		const repo = match[2].replace(/\.git$/, "");
+		void doClone("https://github.com/" + match[1] + "/" + repo + ".git", repo);
 	};
-
 	return (
-		<div className="content" style={{ paddingTop: 24 }}>
-			<h2>My GitHub</h2>
-			<div
-				className="card"
-				style={{ display: "flex", alignItems: "center", gap: 12 }}
-			>
-				{auth?.avatarUrl ? (
-					<img className="avatar" src={auth.avatarUrl} alt="" />
-				) : (
-					<div className="logo" style={{ width: 36, height: 36, fontSize: 18 }}>
-						{auth?.login?.slice(0, 2) ?? "gh"}
-					</div>
+		<div className="content github-content">
+			<div className="account-row">
+				{s.auth?.avatarUrl && (
+					<img className="avatar" src={s.auth.avatarUrl} alt="" />
 				)}
-				<div className="grow" style={{ flex: 1 }}>
-					<b>{auth?.login}</b>
-					<div style={{ color: "var(--muted)", fontSize: 12 }}>
-						已通过 {auth?.source} 登录 · token 存于系统凭据管理器
-					</div>
+				<div className="grow">
+					<strong>{s.auth?.login}</strong>
+					<div className="muted">已连接 GitHub</div>
 				</div>
-				<button className="btn" onClick={() => refreshMyRepos()}>
-					刷新
+				<button
+					className="btn"
+					disabled={s.reposLoading}
+					onClick={() => s.refreshMyRepos()}
+				>
+					刷新仓库
 				</button>
 				<button
 					className="btn"
 					onClick={async () => {
-						await api.logout();
-						await reloadAuth();
+						try {
+							await api.logout();
+							await s.reloadAuth();
+						} catch (e) {
+							s.toast(String(e));
+						}
 					}}
 				>
-					退出
+					退出账号
 				</button>
 			</div>
-
-			<div className="card">
-				<input
-					className="input"
-					placeholder="🔍 搜索我的仓库…"
-					value={q}
-					onChange={(e) => setQ(e.target.value)}
-				/>
-				<div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+			<div className="card repo-tools">
+				<label className="field">
+					<span>查找我的仓库</span>
 					<input
 						className="input"
-						placeholder="粘贴任意 GitHub 仓库 URL，clone 他人仓库…"
-						value={url}
-						onChange={(e) => setUrl(e.target.value)}
-						onKeyDown={(e) =>
-							e.key === "Enter" && !busy && url && cloneUrlRepo()
-						}
+						placeholder="搜索名称或描述"
+						value={q}
+						onChange={(e) => setQ(e.target.value)}
 					/>
+				</label>
+				<form
+					className="clone-form"
+					onSubmit={(e) => {
+						e.preventDefault();
+						cloneUrl();
+					}}
+				>
+					<label className="field grow">
+						<span>通过地址克隆仓库</span>
+						<input
+							className="input"
+							placeholder="https://github.com/owner/repository"
+							disabled={busy}
+							value={url}
+							onChange={(e) => setUrl(e.target.value)}
+						/>
+					</label>
 					<button
 						className="btn primary"
-						disabled={busy || !url}
-						onClick={cloneUrlRepo}
+						type="submit"
+						disabled={busy || !url.trim()}
 					>
-						Clone
+						{busy ? "克隆中…" : "克隆并打开"}
 					</button>
-				</div>
-				{cloneProgress && <div className="progress-line">{cloneProgress}</div>}
+				</form>
+				{s.cloneProgress && (
+					<div className="progress-line" role="status">
+						{s.cloneProgress}
+					</div>
+				)}
+				{error && (
+					<div className="inline-error" role="alert">
+						{error}
+					</div>
+				)}
 			</div>
-
-			<div className="card" style={{ padding: "4px 8px" }}>
-				{!myRepos && <div className="repo-row">加载中…</div>}
-				{myRepos?.length === 0 && <div className="repo-row">没有仓库</div>}
-				{list.map((r) => (
-					<RepoRow
-						key={r.nameWithOwner}
-						r={r}
-						cloned={cloned.has(r.nameWithOwner.toLowerCase())}
-						busy={busy}
-						onClone={doClone}
-					/>
-				))}
-			</div>
-		</div>
-	);
-}
-
-function RepoRow({
-	r,
-	cloned,
-	busy,
-	onClone,
-}: {
-	r: RepoInfo;
-	cloned: boolean;
-	busy: boolean;
-	onClone: (url: string, name: string) => void;
-}) {
-	const sub = [
-		r.isFork && r.parent ? `fork 自 ${r.parent}` : null,
-		r.language,
-		r.pushedAt ? `更新于 ${relTime(r.pushedAt)}` : null,
-	]
-		.filter(Boolean)
-		.join(" · ");
-	return (
-		<div className="repo-row">
-			<span
-				className="dot"
-				style={{ background: cloned ? "#3fb950" : "#6e7681" }}
-			/>
-			<span className="grow">
-				{r.nameWithOwner} {r.isPrivate && <span className="priv">私有</span>}
-				<div className="sub">{sub || r.description || ""}</div>
-			</span>
-			{cloned ? (
-				<span className="badge b-primary">已在 Projects</span>
+			{s.reposError ? (
+				<ResourceState
+					error={s.reposError}
+					onRetry={() => s.refreshMyRepos()}
+				/>
+			) : s.reposLoading && !s.myRepos ? (
+				<ResourceState loading />
+			) : !list.length ? (
+				<ResourceState
+					title={q ? "没有匹配的仓库" : "没有可显示的仓库"}
+					detail={
+						q
+							? "换个关键词，或通过地址克隆。"
+							: "可以通过上方地址克隆公开仓库。"
+					}
+				/>
 			) : (
-				<>
-					<button
-						className="btn sm"
-						title="在 GitHub 打开"
-						onClick={() => openUrl(r.url)}
-					>
-						↗
-					</button>
-					<button
-						className="btn sm primary"
-						disabled={busy}
-						onClick={() =>
-							onClone(`https://github.com/${r.nameWithOwner}.git`, r.name)
-						}
-					>
-						Clone
-					</button>
-				</>
+				<div className="repo-list">
+					{list.map((r) => {
+						const project = added(r);
+						return (
+							<div className="repo-row" key={r.nameWithOwner}>
+								<div className="grow">
+									<strong>{r.nameWithOwner}</strong>
+									{r.isPrivate && <span className="priv">私有</span>}
+									<div className="sub">
+										{r.description || r.language || "暂无描述"}
+									</div>
+									<div className="sub">
+										{r.isFork ? "Fork · " : ""}
+										{r.pushedAt ? "更新于 " + relTime(r.pushedAt) : ""}
+									</div>
+								</div>
+								<div className="ops">
+									<button
+										className="btn sm"
+										aria-label={"在 GitHub 打开 " + r.nameWithOwner}
+										onClick={() =>
+											openUrl(r.url).catch((e) => s.toast(String(e)))
+										}
+									>
+										GitHub ↗
+									</button>
+									{project ? (
+										<button
+											className="btn sm primary"
+											onClick={() => s.openProject(project.id)}
+										>
+											打开项目
+										</button>
+									) : (
+										<button
+											className="btn sm"
+											disabled={busy}
+											onClick={() =>
+												doClone(
+													"https://github.com/" + r.nameWithOwner + ".git",
+													r.name,
+												)
+											}
+										>
+											克隆并打开
+										</button>
+									)}
+								</div>
+							</div>
+						);
+					})}
+				</div>
 			)}
 		</div>
 	);

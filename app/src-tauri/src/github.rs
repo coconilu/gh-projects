@@ -465,20 +465,102 @@ pub async fn cancel_run(state: State<'_, AppState>, owner: String, repo: String,
 }
 
 #[tauri::command]
-pub async fn dispatch_workflow(state: State<'_, AppState>, owner: String, repo: String, workflow_id: u64, r#ref: String) -> Result<(), String> {
+pub async fn dispatch_workflow(state: State<'_, AppState>, owner: String, repo: String, workflow_id: u64, r#ref: String, inputs: Option<std::collections::BTreeMap<String, String>>) -> Result<(), String> {
     require_repo(&owner, &repo)?;
     let token = ensure_token(&state)?;
     gh_post(
         &state.http,
         &token,
         &format!("/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches"),
-        json!({"ref": r#ref}),
+        json!({"ref": r#ref, "inputs": inputs.unwrap_or_default()}),
     )
     .await?;
     Ok(())
 }
 
 /// 创建 PR，返回 html_url
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowInput {
+    name: String,
+    description: String,
+    kind: String,
+    required: bool,
+    default_value: String,
+    options: Vec<String>,
+}
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDetails {
+    default_branch: String,
+    dispatch: bool,
+    inputs: Vec<WorkflowInput>,
+}
+
+fn parse_workflow_details(source: &str, default_branch: String) -> Result<WorkflowDetails, String> {
+    use serde_yaml_ng::Value as Yaml;
+    let document: Yaml = serde_yaml_ng::from_str(source).map_err(|e| format!("流程配置解析失败: {e}"))?;
+    // 兼容 YAML 1.1 解析器把未引用的 on 识别为 true。
+    let on = document.get("on").or_else(|| document.as_mapping().and_then(|m| m.get(Yaml::Bool(true))));
+    let dispatch = on.is_some_and(|on| {
+        on.as_str() == Some("workflow_dispatch")
+            || on.as_sequence().is_some_and(|items| items.iter().any(|i| i.as_str() == Some("workflow_dispatch")))
+            || on.as_mapping().is_some_and(|m| m.contains_key(Yaml::String("workflow_dispatch".into())))
+    });
+    let scalar = |v: &Yaml| -> String {
+        match v { Yaml::String(s) => s.clone(), Yaml::Bool(b) => b.to_string(), Yaml::Number(n) => n.to_string(), _ => String::new() }
+    };
+    let inputs = on.and_then(|v| v.get("workflow_dispatch")).and_then(|v| v.get("inputs"))
+        .and_then(Yaml::as_mapping).map(|fields| fields.iter().filter_map(|(key, v)| {
+            Some(WorkflowInput {
+                name: key.as_str()?.to_string(),
+                description: v.get("description").and_then(Yaml::as_str).unwrap_or("").into(),
+                kind: v.get("type").and_then(Yaml::as_str).unwrap_or("string").into(),
+                required: v.get("required").and_then(Yaml::as_bool).unwrap_or(false),
+                default_value: v.get("default").map(scalar).unwrap_or_default(),
+                options: v.get("options").and_then(Yaml::as_sequence).map(|v| v.iter().map(scalar).collect()).unwrap_or_default(),
+            })
+        }).collect()).unwrap_or_default();
+    Ok(WorkflowDetails { default_branch, dispatch, inputs })
+}
+
+#[tauri::command]
+pub async fn workflow_details(state: State<'_, AppState>, owner: String, repo: String, workflow_id: u64) -> Result<WorkflowDetails, String> {
+    require_repo(&owner, &repo)?;
+    let token = ensure_token(&state)?;
+    let metadata = gh_get(&state.http, &token, &format!("/repos/{owner}/{repo}"), &[]).await?;
+    let default_branch = metadata["default_branch"].as_str().ok_or("无法确定默认分支")?;
+    let workflow = gh_get(&state.http, &token, &format!("/repos/{owner}/{repo}/actions/workflows/{workflow_id}"), &[]).await?;
+    let path = workflow["path"].as_str().ok_or("流程路径不存在")?;
+    if !path.starts_with(".github/workflows/") || path.contains("..") {
+        return Err("不支持的流程配置路径".into());
+    }
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/contents/{path}");
+    let response = state.http.send(|c| c.get(&url).bearer_auth(&token)
+        .query(&[("ref", default_branch)]).header("Accept", "application/vnd.github.raw+json")).await?;
+    if !response.status().is_success() { return Err(format!("无法读取流程配置: HTTP {}", response.status())); }
+    let source = response.text().await.map_err(|e| format!("读取流程配置失败: {e}"))?;
+    parse_workflow_details(&source, default_branch.into())
+}
+
+#[cfg(test)]
+mod workflow_tests {
+    use super::parse_workflow_details;
+    #[test]
+    fn supports_all_dispatch_forms_and_preserves_defaults() {
+        for source in ["on: workflow_dispatch", "on: [push, workflow_dispatch]", "on:\n  workflow_dispatch:", "'on':\n  workflow_dispatch:"] {
+            assert!(parse_workflow_details(source, "master".into()).unwrap().dispatch);
+        }
+        assert!(!parse_workflow_details("on: [push, pull_request]", "master".into()).unwrap().dispatch);
+        let details = parse_workflow_details("on:\n  workflow_dispatch:\n    inputs:\n      bump:\n        type: choice\n        required: true\n        default: patch\n        options: [patch, minor, major, none]\n      dry:\n        type: boolean\n        default: false", "master".into()).unwrap();
+        assert_eq!(details.default_branch, "master");
+        assert_eq!(details.inputs[0].default_value, "patch");
+        assert_eq!(details.inputs[0].options.len(), 4);
+        assert!(details.inputs[0].required);
+        assert_eq!(details.inputs[1].default_value, "false");
+    }
+}
+
 pub async fn create_pr_api(http: &Http, token: &str, owner: &str, repo: &str, title: &str, head: &str, base: &str, body: &str) -> Result<String, String> {
     let v = gh_post(
         http,

@@ -54,6 +54,7 @@ pub fn run() {
             projects::create_pr,
             // Actions
             github::list_workflows,
+            github::workflow_details,
             github::list_runs,
             github::rerun_run,
             github::cancel_run,

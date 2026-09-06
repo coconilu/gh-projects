@@ -39,6 +39,7 @@ pub struct Project {
     pub fork_of: Option<String>,
     pub color: String,
     pub local_path: String,
+    pub default_branch: String,
     pub added_at: i64,
     pub checkouts: Vec<CheckoutInfo>,
 }
@@ -101,6 +102,7 @@ fn build_project(sp: &StoredProject) -> Project {
         fork_of: sp.fork_of.clone(),
         color: sp.color.clone(),
         local_path: sp.local_path.clone(),
+        default_branch: git::default_branch(&main),
         added_at: sp.added_at,
         checkouts,
     }

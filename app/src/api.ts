@@ -13,6 +13,7 @@ import type {
 	RepoInfo,
 	RunInfo,
 	StatusMap,
+	WorkflowDetails,
 	WorkflowInfo,
 } from "./types";
 
@@ -97,6 +98,11 @@ export const createPr = (
 // ---- Actions ----
 export const listWorkflows = (owner: string, repo: string) =>
 	invoke<WorkflowInfo[]>("list_workflows", { owner, repo });
+export const workflowDetails = (
+	owner: string,
+	repo: string,
+	workflowId: number,
+) => invoke<WorkflowDetails>("workflow_details", { owner, repo, workflowId });
 export const listRuns = (owner: string, repo: string, workflowId: number) =>
 	invoke<RunInfo[]>("list_runs", { owner, repo, workflowId });
 export const rerunRun = (owner: string, repo: string, runId: number) =>
@@ -108,7 +114,9 @@ export const dispatchWorkflow = (
 	repo: string,
 	workflowId: number,
 	ref: string,
-) => invoke<void>("dispatch_workflow", { owner, repo, workflowId, ref });
+	inputs: Record<string, string> = {},
+) =>
+	invoke<void>("dispatch_workflow", { owner, repo, workflowId, ref, inputs });
 export const latestRunForBranch = (
 	owner: string,
 	repo: string,

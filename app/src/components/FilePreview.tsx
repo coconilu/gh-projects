@@ -1,8 +1,8 @@
 import { marked } from "marked";
-import { useEffect, useState } from "react";
 import * as api from "../api";
+import { TAB_LABELS } from "../navigation";
 import { findCheckout, useStore } from "../store";
-import type { FilePreview as Preview } from "../types";
+import { ResourceState, useResource } from "./ResourceState";
 
 export default function FilePreview({
 	fkey,
@@ -11,60 +11,62 @@ export default function FilePreview({
 	fkey: string;
 	co: string;
 }) {
-	const { projects, toast } = useStore();
-	const [pv, setPv] = useState<Preview | null>(null);
+	const { projects, tab, returnToProject, toast } = useStore();
 	const hit = findCheckout(projects, co);
 	const rel = fkey.slice(co.length + 1);
-	const fname = rel.split("/").pop() ?? rel;
-	const abs = hit ? `${hit.c.path}/${rel}` : null;
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: abs 由 fkey/co 派生，文件切换时重新加载即可
-	useEffect(() => {
-		setPv(null);
-		if (!abs) return;
-		api
-			.readFilePreview(abs)
-			.then(setPv)
-			.catch((e) => toast(`读取文件失败: ${e}`));
-	}, [fkey, co]);
-
-	if (!hit) return <div className="content">checkout 不存在</div>;
-	const isMd = fname.toLowerCase().endsWith(".md");
-
+	const name = rel.split("/").pop() ?? rel;
+	const abs = hit ? hit.c.path + "/" + rel : null;
+	const preview = useResource(fkey, () =>
+		abs ? api.readFilePreview(abs) : Promise.reject("工作树已不存在"),
+	);
 	return (
-		<div className="content">
-			<div className="crumb">
-				{hit.c.branch} / <b>{rel}</b>
-			</div>
-			<div className="preview-head">
-				📄 {fname}{" "}
-				<span style={{ color: "var(--faint)" }}>
-					· 双击文件树可用编辑器打开
-				</span>
-				<span style={{ flex: 1 }} />
+		<div className="content file-content">
+			<div className="page-heading">
+				<div>
+					<button className="back-link" onClick={returnToProject}>
+						← 返回{TAB_LABELS[tab] ?? "项目"}
+					</button>
+					<h2>{name}</h2>
+					<p className="muted path-text">
+						{hit?.c.branch} / {rel}
+					</p>
+				</div>
 				<button
-					className="btn sm"
+					className="btn"
+					disabled={!abs}
 					onClick={() =>
-						abs && api.openInEditor(abs).catch((e) => toast(`${e}`))
+						abs && api.openInEditor(abs).catch((e) => toast(String(e)))
 					}
 				>
 					在编辑器打开
 				</button>
 			</div>
-			{!pv && <div className="hint">加载中…</div>}
-			{pv?.isBinary && <div className="hint">二进制文件，无法预览</div>}
-			{pv && !pv.isBinary && isMd && (
+			{preview.loading || preview.error ? (
+				<ResourceState
+					loading={preview.loading}
+					error={preview.error}
+					onRetry={preview.reload}
+				/>
+			) : preview.data?.isBinary ? (
+				<ResourceState
+					title="此文件无法直接预览"
+					detail="二进制文件可在外部编辑器中打开。"
+				/>
+			) : preview.data && name.toLowerCase().endsWith(".md") ? (
 				<div
 					className="card md"
-					// biome-ignore lint/security/noDangerouslySetInnerHtml: 本地 Markdown 文件预览，内容由 marked 生成
-					dangerouslySetInnerHTML={{ __html: marked.parse(pv.text) as string }}
+					// biome-ignore lint/security/noDangerouslySetInnerHtml: 现有本地 Markdown 预览行为
+					dangerouslySetInnerHTML={{
+						__html: marked.parse(preview.data.text) as string,
+					}}
 				/>
+			) : (
+				<pre className="code">{preview.data?.text || "（空文件）"}</pre>
 			)}
-			{pv && !pv.isBinary && !isMd && (
-				<>
-					<pre className="code">{pv.text}</pre>
-					{pv.truncated && <div className="hint">（内容过长，已截断）</div>}
-				</>
+			{preview.data?.truncated && (
+				<p className="muted">
+					文件内容较长，当前只显示部分内容；完整文件可在编辑器查看。
+				</p>
 			)}
 		</div>
 	);

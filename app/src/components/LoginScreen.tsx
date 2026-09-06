@@ -39,7 +39,14 @@ export default function LoginScreen() {
 						marginBottom: 14,
 					}}
 				>
-					<div className="logo">gh</div>
+					<img
+						src={
+							new URL("../../src-tauri/icons/32x32.png", import.meta.url).href
+						}
+						width={32}
+						height={32}
+						alt="GitGrove"
+					/>
 					<h2 style={{ margin: 0 }}>登录 GitHub</h2>
 				</div>
 				<p
