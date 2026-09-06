@@ -585,9 +585,12 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        // Windows TEMP 可能使用 RUNNER~1 等 8.3 短路径，而 PowerShell 会返回长路径。
+        // 比较真实目录身份，避免把同一目录的两种拼写误判为启动位置错误。
+        let actual = String::from_utf8(output.stdout).unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&output.stdout).trim(),
-            target.to_string_lossy()
+            std::fs::canonicalize(actual.trim()).unwrap(),
+            std::fs::canonicalize(&target).unwrap()
         );
     }
 }
