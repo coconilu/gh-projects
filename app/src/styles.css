@@ -1312,6 +1312,19 @@ button:disabled {
 .more-popover button:hover {
 	background: var(--border);
 }
+.open-in-popover {
+	width: 260px;
+}
+.open-in-popover p {
+	padding: 8px 10px;
+	margin: 0;
+	font-size: 12px;
+	white-space: normal;
+}
+.open-in-popover button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
 .danger-text {
 	color: var(--red);
 }

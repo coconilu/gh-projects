@@ -1,3 +1,4 @@
+mod agents;
 mod fsx;
 mod git;
 mod github;
@@ -49,6 +50,8 @@ pub fn run() {
             launch::get_launch_preferences,
             launch::save_launch_preferences,
             launch::discover_launch_apps,
+            agents::agent_open_support,
+            agents::open_in_agent,
             fsx::reveal_in_explorer,
             // issues / PRs
             github::list_issues,
