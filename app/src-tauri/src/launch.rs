@@ -6,6 +6,18 @@ use std::sync::Mutex;
 
 use crate::{git, store};
 
+#[cfg(windows)]
+mod windows_console;
+
+#[cfg(windows)]
+fn console_arguments(id: &str) -> Option<&'static str> {
+    match id {
+        "powershell-core" | "powershell" => Some("-NoExit"),
+        "cmd" => Some("/K"),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LaunchPreferences {
@@ -280,6 +292,12 @@ fn process_names() -> Option<Vec<String>> {
     )
 }
 
+fn process_name_matches(actual: &str, expected: &str, linux_comm: bool) -> bool {
+    // Linux /proc comm 最多 15 字节；当前应用清单中的进程名均为 ASCII。
+    // macOS / Windows 保持完整名称匹配，不能把相同前缀的其他进程当作目标。
+    actual == expected || (linux_comm && expected.len() > 15 && expected.get(..15) == Some(actual))
+}
+
 fn discover() -> Vec<LaunchApp> {
     let processes = process_names();
     catalog()
@@ -290,9 +308,11 @@ fn discover() -> Vec<LaunchApp> {
             kind: app.kind.into(),
             path: resolve(app).map(|p| p.to_string_lossy().into_owned()),
             running: processes.as_ref().map(|names| {
-                app.processes
-                    .iter()
-                    .any(|name| names.iter().any(|n| n == name))
+                app.processes.iter().any(|name| {
+                    names
+                        .iter()
+                        .any(|n| process_name_matches(n, name, cfg!(target_os = "linux")))
+                })
             }),
         })
         .collect()
@@ -393,12 +413,6 @@ fn launch_command(app: &AppSpec, executable: &Path, target: &Path) -> Command {
             "windows-terminal" => {
                 command.args(["-w", "new", "new-tab", "-d"]).arg(".");
             }
-            "powershell-core" | "powershell" => {
-                command.arg("-NoExit");
-            }
-            "cmd" => {
-                command.arg("/K");
-            }
             "git-bash" => {
                 command.arg("--cd=.");
             }
@@ -409,11 +423,6 @@ fn launch_command(app: &AppSpec, executable: &Path, target: &Path) -> Command {
                 command.arg("--workdir").arg(target);
             }
             _ => {}
-        }
-        #[cfg(windows)]
-        if matches!(app.id, "powershell-core" | "powershell" | "cmd") {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0000_0010); // CREATE_NEW_CONSOLE：用户主动打开的终端必须可见。
         }
     }
     command
@@ -431,16 +440,19 @@ fn launch(path: String, kind: &str) -> Result<(), String> {
         &prefs.terminal
     };
     let (app, executable) = selected_app(kind, id)?;
+    #[cfg(windows)]
+    if let Some(arguments) = console_arguments(app.id) {
+        windows_console::spawn(&executable, arguments, &target)
+            .map_err(|e| format!("无法启动 {}: {e}", app.name))?;
+        return Ok(());
+    }
     let mut command = launch_command(&app, &executable, &target);
     // Electron 编辑器不应继承父进程的 Node 模式。
     command.env_remove("ELECTRON_RUN_AS_NODE");
-    if app.kind == "editor" || !matches!(app.id, "powershell-core" | "powershell" | "cmd" | "xterm")
-    {
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     let mut child = command
         .spawn()
         .map_err(|e| format!("无法启动 {}: {e}。请检查配置中的应用路径。", app.name))?;
@@ -522,6 +534,40 @@ mod tests {
         assert!(launch(file.to_string_lossy().into(), "terminal").is_err());
     }
 
+    #[test]
+    fn process_matching_accounts_for_linux_comm_truncation_only() {
+        assert!(process_name_matches(
+            "gnome-terminal-",
+            "gnome-terminal-server",
+            true
+        ));
+        assert!(process_name_matches(
+            "gnome-terminal-server",
+            "gnome-terminal-server",
+            true
+        ));
+        assert!(!process_name_matches(
+            "gnome-terminal-",
+            "gnome-terminal-server",
+            false
+        ));
+        assert!(!process_name_matches(
+            "gnome-terminal",
+            "gnome-terminal-server",
+            true
+        ));
+        assert!(process_name_matches(
+            "windowsterminal.exe",
+            "windowsterminal.exe",
+            false
+        ));
+        assert!(!process_name_matches(
+            "windowsterminal",
+            "windowsterminal.exe",
+            false
+        ));
+    }
+
     #[cfg(windows)]
     #[test]
     fn finds_gui_executable_from_cli_bin_and_common_install_without_path() {
@@ -569,27 +615,44 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn real_powershell_keeps_special_character_working_directory() {
-        use std::os::windows::process::CommandExt;
-        let (app, executable) = selected_app("terminal", "powershell").unwrap();
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+        };
+        let (_, executable) = selected_app("terminal", "powershell").unwrap();
         let scratch = Scratch::new();
         let target = scratch.0.join("项目 & O'Brien %PATH%; $value");
         std::fs::create_dir_all(&target).unwrap();
-        let mut command = launch_command(&app, &executable, &target);
-        // 同一启动器配置，测试时隐藏终端，并用固定命令读回工作目录后退出。
-        command.creation_flags(0x0800_0000);
-        command.args(["-NoProfile", "-NonInteractive", "-Command",
-            "[Console]::OutputEncoding = [Text.UTF8Encoding]::new(); [Console]::Write((Get-Location).Path); exit"]);
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
+        // 即使 cargo test 的 stdio 是管道，新终端也必须使用自己的控制台。
+        // 使用固定的相对文件名回传测试结果，绝不把 target 拼入 PowerShell 代码。
+        let process = windows_console::spawn_hidden(&executable,
+            "-NoExit -NoProfile -NonInteractive -Command \"$r = @{cwd=(Get-Location).Path; input=[Console]::IsInputRedirected; output=[Console]::IsOutputRedirected; error=[Console]::IsErrorRedirected}; [IO.File]::WriteAllText((Join-Path (Get-Location).Path 'result.json'), ($r | ConvertTo-Json)); exit\"",
+            &target).unwrap();
+        // SAFETY: process 是当前测试创建且仍持有的进程句柄；只允许终止该测试进程。
+        let status = unsafe { WaitForSingleObject(process.as_raw_handle(), 15_000) };
+        if status != WAIT_OBJECT_0 {
+            unsafe {
+                TerminateProcess(process.as_raw_handle(), 1);
+            }
+            panic!("PowerShell 原生测试未在 15 秒内完成: {status}");
+        }
+        let mut exit_code = 0;
+        assert_ne!(
+            unsafe { GetExitCodeProcess(process.as_raw_handle(), &mut exit_code) },
+            0
         );
+        assert_eq!(exit_code, 0);
+        let result: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(target.join("result.json")).unwrap())
+                .unwrap();
+        for stream in ["input", "output", "error"] {
+            assert_eq!(result[stream], false, "{stream} 不应继承父进程重定向");
+        }
         // Windows TEMP 可能使用 RUNNER~1 等 8.3 短路径，而 PowerShell 会返回长路径。
         // 比较真实目录身份，避免把同一目录的两种拼写误判为启动位置错误。
-        let actual = String::from_utf8(output.stdout).unwrap();
         assert_eq!(
-            std::fs::canonicalize(actual.trim()).unwrap(),
+            std::fs::canonicalize(result["cwd"].as_str().unwrap()).unwrap(),
             std::fs::canonicalize(&target).unwrap()
         );
     }
