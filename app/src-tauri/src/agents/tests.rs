@@ -1,3 +1,4 @@
+#![cfg(windows)]
 use super::*;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -154,7 +155,13 @@ impl Mock {
     async fn new(
         handler: impl Fn(&Request) -> (u16, String, Value) + Send + Sync + 'static,
     ) -> Self {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        Self::new_at("127.0.0.1", handler).await
+    }
+    async fn new_at(
+        host: &str,
+        handler: impl Fn(&Request) -> (u16, String, Value) + Send + Sync + 'static,
+    ) -> Self {
+        let listener = tokio::net::TcpListener::bind((host, 0)).await.unwrap();
         let base = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
@@ -184,7 +191,9 @@ impl Mock {
                         }
                     }
                 }
-                let end = bytes.windows(4).position(|b| b == b"\r\n\r\n").unwrap();
+                let Some(end) = bytes.windows(4).position(|b| b == b"\r\n\r\n") else {
+                    continue;
+                };
                 let headers = String::from_utf8_lossy(&bytes[..end]);
                 let mut first = headers.lines().next().unwrap().split_whitespace();
                 let request = Request {
@@ -211,15 +220,34 @@ impl Mock {
     }
     fn kimi(&self) -> Kimi {
         Kimi {
-            http: local_client().unwrap(),
+            http: Client::for_test_current_process(),
             base: self.base.clone(),
             token: "test-only-secret".into(),
+            instance: self.instance(),
+        }
+    }
+    fn instance(&self) -> Instance {
+        Instance {
+            host: self
+                .base
+                .host_str()
+                .unwrap()
+                .trim_matches(['[', ']'])
+                .to_string(),
+            port: self.base.port().unwrap(),
+            pid: std::process::id(),
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64,
+            heartbeat_at: 0,
         }
     }
     fn register(&self, home: &Path, index: u64) {
         let dir = home.join("server/instances");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(format!("{index}.json")), json!({"host":"127.0.0.1","port":self.base.port().unwrap(),"pid":123,"heartbeat_at":index}).to_string()).unwrap();
+        let instance = self.instance();
+        std::fs::write(dir.join(format!("{index}.json")), json!({"host":instance.host,"port":instance.port,"pid":instance.pid,"started_at":instance.started_at,"heartbeat_at":index}).to_string()).unwrap();
     }
 }
 
@@ -334,10 +362,12 @@ async fn multiple_instances_skip_stale_or_incompatible_before_starting() {
     .await;
     good.register(&scratch.0, 1);
     bad.register(&scratch.0, 2);
-    let (selected, owned) = connect_kimi(&scratch.0).await.unwrap();
+    let selected = discover(&scratch.0, &Client::for_test_current_process())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(selected.base, good.base);
-    assert!(owned.is_none());
-    assert_eq!(bad.requests.lock().unwrap().len(), 2);
+    assert_eq!(bad.requests.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
@@ -346,6 +376,179 @@ async fn unsafe_auth_configuration_is_not_reused() {
         Mock::new(|_| success(json!({"server_version":"1","dangerous_bypass_auth":true}))).await;
     assert!(mock.kimi().verify().await.unwrap_err().contains("默认鉴权"));
     assert_eq!(mock.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn impersonated_health_server_never_receives_fake_token() {
+    let scratch = Scratch::new();
+    std::fs::write(scratch.0.join("server.token"), "test-only-secret").unwrap();
+    // An impostor would return successful health/meta bodies if queried.
+    let mock = Mock::new(|_| {
+        success(json!({"ok":true,"server_version":"0.40.1","dangerous_bypass_auth":false}))
+    })
+    .await;
+    mock.register(&scratch.0, 1);
+    let record = scratch.0.join("server/instances/1.json");
+    let original: Value = serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+    for (field, invalid) in [
+        ("started_at", 1u64),
+        ("started_at", 0),
+        ("pid", u32::MAX as u64),
+    ] {
+        let mut changed = original.clone();
+        changed[field] = json!(invalid);
+        std::fs::write(&record, changed.to_string()).unwrap();
+        assert!(!matches!(
+            discover(&scratch.0, &Client::for_test_current_process()).await,
+            Ok(Some(_))
+        ));
+    }
+    std::fs::write(&record, original.to_string()).unwrap();
+    // Production policy rejects even a same-user listener with a non-Kimi image.
+    assert!(discover(&scratch.0, &Client::new().unwrap()).await.is_err());
+    assert!(mock.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn different_user_sid_and_unconfirmable_process_send_no_authorization() {
+    let mock = Mock::new(|_| success(json!({}))).await;
+    // A valid NULL SID (S-1-0-0) models a different expected OS identity. No test
+    // account is created; the actual listener's TokenUser still comes from Win32.
+    let other_user = Client::for_test_expected_user(vec![1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let error = other_user
+        .json(
+            &mock.instance(),
+            mock.base.join("api/v1/meta").unwrap(),
+            Method::GET,
+            "test-only-secret",
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error, UNVERIFIED_PEER);
+    let mut inaccessible = mock.instance();
+    inaccessible.pid = 4; // Windows System: access/identity cannot match this test peer.
+    assert!(Client::for_test_current_process()
+        .json(
+            &inaccessible,
+            mock.base.join("api/v1/meta").unwrap(),
+            Method::GET,
+            "test-only-secret",
+            None
+        )
+        .await
+        .is_err());
+    assert!(mock.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn authenticated_ipv6_request_uses_the_verified_connection() {
+    let mock = Mock::new_at("::1", |_| success(json!({"version":"test"}))).await;
+    mock.kimi()
+        .request(Method::GET, "api/v1/meta", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.requests.lock().unwrap()[0].auth.as_deref(),
+        Some("Bearer test-only-secret")
+    );
+}
+
+#[test]
+#[ignore = "Subprocess fixture only: requires a test-owned port and scratch directory"]
+fn peer_listener_child() {
+    use std::io::{Read, Write};
+    let directory = PathBuf::from(std::env::var("GITGROVE_PEER_TEST_DIR").unwrap());
+    let port: u16 = std::env::var("GITGROVE_PEER_TEST_PORT")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+    socket.set_reuse_address(true).unwrap();
+    let address: std::net::SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    socket.bind(&address.into()).unwrap();
+    socket.listen(8).unwrap();
+    let listener: std::net::TcpListener = socket.into();
+    std::fs::write(directory.join("ready"), std::process::id().to_string()).unwrap();
+    let (mut stream, _) = listener.accept().unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut bytes = [0u8; 8192];
+    let length = stream.read(&mut bytes).unwrap();
+    std::fs::write(directory.join("captured"), &bytes[..length]).unwrap();
+    if length > 0 {
+        let body = r#"{"code":0,"data":{"ok":true}}"#;
+        let _ = write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+    }
+}
+
+async fn wait_for_file(path: &Path) {
+    for _ in 0..100 {
+        if path.is_file() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("test helper did not become ready");
+}
+
+#[tokio::test]
+async fn reconnect_to_same_port_with_a_new_owner_never_sends_authorization() {
+    let scratch = Scratch::new();
+    let mock = Mock::new(|_| success(json!({"ok":true}))).await;
+    let kimi = mock.kimi();
+    // First connection really authenticates with our own verified listener.
+    kimi.request(Method::GET, "api/v1/meta", None)
+        .await
+        .unwrap();
+    assert_eq!(mock.requests.lock().unwrap().len(), 1);
+    let port = mock.base.port().unwrap();
+    drop(mock);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    // A different process with the SAME image and OS user takes the old port.
+    // Checking only the old PID's liveness would still pass (it is this test).
+    let child = git::new_cmd(std::env::current_exe().unwrap().to_str().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "agents::tests::peer_listener_child",
+            "--nocapture",
+        ])
+        .env("GITGROVE_PEER_TEST_DIR", &scratch.0)
+        .env("GITGROVE_PEER_TEST_PORT", port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let _owned = StartedServer(Some(child));
+    wait_for_file(&scratch.0.join("ready")).await;
+    let error = kimi
+        .request(Method::GET, "api/v1/meta", None)
+        .await
+        .unwrap_err();
+    assert_eq!(error, UNVERIFIED_PEER);
+    wait_for_file(&scratch.0.join("captured")).await;
+    assert!(std::fs::read(scratch.0.join("captured"))
+        .unwrap()
+        .is_empty());
+    // A final browser-handoff validation also refuses the stale instance.
+    assert!(kimi.http.verify_peer(&kimi.instance).await.is_err());
+}
+
+#[tokio::test]
+async fn final_browser_peer_check_is_credential_free() {
+    let mock = Mock::new(|_| panic!("handoff check must not send an HTTP request")).await;
+    let kimi = mock.kimi();
+    let checked = kimi.http.verify_peer(&kimi.instance).await.unwrap();
+    drop(checked);
+    tokio::task::yield_now().await;
+    assert!(mock.requests.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -405,10 +608,41 @@ async fn isolated_cold_start() {
     let first = kimi.session_url(&target).await.unwrap();
     let second = kimi.session_url(&target).await.unwrap();
     assert_eq!(first.path(), second.path());
+    let handoff = kimi.http.verify_peer(&kimi.instance).await.unwrap();
+    drop(handoff);
     println!(
         "verified port={} path={} (credential omitted)",
         kimi.base.port().unwrap(),
         first.path()
     );
     drop(owned);
+}
+
+#[tokio::test]
+#[ignore = "Read-only compatibility probe: sends only a fixed fake token, never reads server.token"]
+async fn existing_kimi_instances_accept_verified_socket_and_reject_fake_token() {
+    let client = Client::new().unwrap();
+    let records = instances(&kimi_home().unwrap()).unwrap();
+    assert!(
+        !records.is_empty(),
+        "requires an already running Kimi Web instance"
+    );
+    for instance in records {
+        let url = instance.base_url().unwrap().join("api/v1/meta").unwrap();
+        let (status, _) = client
+            .json(
+                &instance,
+                url,
+                Method::GET,
+                "gitgrove-peer-probe-not-a-real-token",
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(status, 401);
+        println!(
+            "verified pid={} port={} fake-token status=401",
+            instance.pid, instance.port
+        );
+    }
 }

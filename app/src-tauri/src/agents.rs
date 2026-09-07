@@ -1,5 +1,7 @@
 // GUI adapters. Credentials and authenticated URLs never cross the Tauri boundary.
-use reqwest::{Client, Method, Url};
+#[cfg(not(windows))]
+use reqwest::Client;
+use reqwest::{Method, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -8,9 +10,15 @@ use std::time::Duration;
 
 use crate::git;
 
+#[cfg(windows)]
+mod transport;
+#[cfg(windows)]
+use transport::Client;
+
 const INCOMPATIBLE: &str = "Kimi Code 接口不兼容，请更新 Kimi Code 后重启 Web 服务再试。";
 const AUTH_FAILED: &str = "Kimi Code 鉴权失败，请用 kimi web 重新打开服务，确认它与 GitGrove 使用同一个 KIMI_CODE_HOME 后重试。";
 const UNREACHABLE: &str = "无法连接 Kimi Code 本地服务，请重新运行 kimi web 后重试。";
+const UNVERIFIED_PEER: &str = "无法确认 Kimi Code 服务的进程或 Windows 用户身份，已停止发送凭证。请以当前 Windows 用户重新运行 kimi web 后重试。";
 static OPEN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Copy, Deserialize)]
@@ -87,11 +95,13 @@ fn open_gui_url(url: &Url, agent: Agent) -> Result<(), String> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Instance {
     host: String,
     port: u16,
     pid: u32,
+    #[serde(default)]
+    started_at: u64,
     #[serde(default)]
     heartbeat_at: u64,
 }
@@ -153,13 +163,14 @@ fn token(home: &Path) -> Result<String, String> {
 }
 
 fn local_client() -> Result<Client, String> {
-    Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_millis(700))
-        .timeout(Duration::from_secs(8))
-        .build()
-        .map_err(|_| "无法初始化本地连接，请重启 GitGrove。".into())
+    #[cfg(windows)]
+    {
+        Client::new()
+    }
+    #[cfg(not(windows))]
+    {
+        Err(UNVERIFIED_PEER.into())
+    }
 }
 
 // Intentionally no Debug / Serialize: this object contains a server credential.
@@ -167,9 +178,11 @@ struct Kimi {
     http: Client,
     base: Url,
     token: String,
+    instance: Instance,
 }
 
 impl Kimi {
+    #[cfg(windows)]
     async fn request(
         &self,
         method: Method,
@@ -177,19 +190,16 @@ impl Kimi {
         body: Option<Value>,
     ) -> Result<Value, String> {
         let url = self.base.join(route).map_err(|_| INCOMPATIBLE)?;
-        let mut request = self.http.request(method, url).bearer_auth(&self.token);
-        if let Some(body) = body {
-            request = request.json(&body);
-        }
-        // Do not include reqwest errors, response bodies, request URLs or headers in errors/logs.
-        let response = request.send().await.map_err(|_| UNREACHABLE)?;
-        if response.status() == 401 || response.status() == 403 {
+        let (status, value) = self
+            .http
+            .json(&self.instance, url, method, &self.token, body)
+            .await?;
+        if status == 401 || status == 403 {
             return Err(AUTH_FAILED.into());
         }
-        if !response.status().is_success() {
+        if !status.is_success() {
             return Err("Kimi Code 拒绝了请求，请检查 Web 服务状态或更新版本后重试。".into());
         }
-        let value: Value = response.json().await.map_err(|_| INCOMPATIBLE)?;
         if route == "openapi.json" {
             return Ok(value);
         }
@@ -199,6 +209,16 @@ impl Kimi {
             Some(40409) => Err("Kimi Code 无法访问目标目录，请检查文件夹及权限后重试。".into()),
             _ => Err(INCOMPATIBLE.into()),
         }
+    }
+
+    #[cfg(not(windows))]
+    async fn request(
+        &self,
+        _method: Method,
+        _route: &str,
+        _body: Option<Value>,
+    ) -> Result<Value, String> {
+        Err(UNVERIFIED_PEER.into())
     }
 
     async fn verify(&self) -> Result<(), String> {
@@ -355,21 +375,15 @@ async fn discover(home: &Path, http: &Client) -> Result<Option<Kimi>, String> {
     let mut failure = None;
     for instance in instances(home)? {
         let base = instance.base_url().expect("validated instance");
-        let health = http
-            .get(base.join("api/v1/healthz").unwrap())
-            .timeout(Duration::from_millis(800))
-            .send()
-            .await;
-        if !health.is_ok_and(|r| r.status().is_success()) {
-            continue;
-        }
         let kimi = Kimi {
             http: http.clone(),
             base,
             token: token(home)?,
+            instance,
         };
         match kimi.verify().await {
             Ok(()) => return Ok(Some(kimi)),
+            Err(error) if error == UNREACHABLE => continue,
             Err(error) => failure = Some(error),
         }
     }
@@ -506,6 +520,10 @@ pub async fn open_in_agent(path: String, agent: Agent) -> Result<OpenReceipt, St
         Agent::Kimi => {
             let (kimi, owned) = connect_kimi(&kimi_home()?).await?;
             let url = kimi.session_url(&target).await?;
+            // Stop if the original process or socket owner changed after the API
+            // requests; hold this credential-free connection through handoff.
+            #[cfg(windows)]
+            let _handoff_peer = kimi.http.verify_peer(&kimi.instance).await?;
             open_gui_url(&url, agent)?;
             if let Some(owned) = owned {
                 owned.retain();
