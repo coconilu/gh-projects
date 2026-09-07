@@ -64,6 +64,15 @@ export function OpenInMenu({ path }: { path: string }) {
 			setError(String(error));
 			// Navigation may have unmounted the originating menu during startup.
 			useStore.getState().toast(String(error));
+			// Disabling the clicked option can drop focus to body. Restore this
+			// menu's keyboard path without taking focus from another control/modal.
+			if (
+				document.activeElement === document.body &&
+				!document.querySelector("dialog[open]") &&
+				trigger.current?.getAttribute("aria-expanded") === "true"
+			) {
+				trigger.current.focus();
+			}
 		} finally {
 			useOpening.setState({ target: null });
 		}
