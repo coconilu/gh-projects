@@ -783,7 +783,7 @@ function Actions({ p }: { p: Project }) {
 						) : (
 							<div className="run-list">
 								{runs.data.map((r) => (
-									<div className="run" key={r.id}>
+									<div className="workflow-run" key={r.id}>
 										<div className="grow">
 											<strong>
 												#{r.runNumber} · {r.branch}
